@@ -1,238 +1,69 @@
-import { useState, useEffect, useMemo, useRef } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid, Legend } from "recharts";
-import Mermaid from "./Mermaid.jsx";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { supabase, isSupabase } from "./supabase.js";
 
-/* ─────────────  Retirement budget categories (today's $/mo)  ───────────── */
-const CATS = [
-  {key:"Housing",color:"#2a9d8f",items:[
-    {k:"rent",l:"rent/mortgage",s:100,d:2400},{k:"prop",l:"property tax",s:25,d:0},
-    {k:"hIns",l:"home ins",s:10,d:50},{k:"hydr",l:"hydro",s:25,d:90},
-    {k:"gas_",l:"gas/heat",s:10,d:50},{k:"watr",l:"water",s:10,d:0},
-    {k:"inet",l:"internet",s:10,d:80},{k:"maint",l:"home maint",s:25,d:100}]},
-  {key:"Food",color:"#457bb5",items:[
-    {k:"groc",l:"groceries",s:50,d:700},{k:"dine",l:"dining out",s:25,d:250},
-    {k:"deli",l:"takeout",s:25,d:100},{k:"coff",l:"coffee",s:10,d:60},
-    {k:"alc_",l:"alcohol/wine",s:10,d:80}]},
-  {key:"Transport",color:"#8b5fb0",items:[
-    {k:"carP",l:"car pmt",s:50,d:0},{k:"chrg",l:"fuel/charging",s:10,d:80},
-    {k:"cIns",l:"auto ins",s:25,d:200},{k:"mnt_",l:"car maint",s:25,d:80},
-    {k:"reg_",l:"plates/reg",s:5,d:15},{k:"park",l:"parking",s:25,d:50}]},
-  {key:"Healthcare",color:"#c95858",items:[
-    {k:"hcIns",l:"private ins",s:25,d:300},{k:"dent",l:"dental",s:10,d:80},
-    {k:"vis_",l:"vision",s:10,d:30},{k:"rx__",l:"prescriptions",s:10,d:50},
-    {k:"supp",l:"supplements",s:10,d:60},{k:"ther",l:"therapy/wellness",s:25,d:100}]},
-  {key:"Personal",color:"#3a9e6e",items:[
-    {k:"hair",l:"haircuts",s:10,d:80},{k:"skin",l:"skincare",s:10,d:50},
-    {k:"gym_",l:"gym/fitness",s:10,d:100}]},
-  {key:"Clothing",color:"#6a8ab5",items:[
-    {k:"clth",l:"clothes",s:25,d:80},{k:"shoe",l:"shoes",s:25,d:30}]},
-  {key:"Travel",color:"#d4845a",items:[
-    {k:"trip",l:"big trips",s:100,d:600},{k:"week",l:"weekends",s:25,d:200},
-    {k:"flgt",l:"flights",s:50,d:200},{k:"vIns",l:"travel ins",s:10,d:30}]},
-  {key:"Entertain",color:"#9a7ab0",items:[
-    {k:"entr",l:"events/shows",s:25,d:120},{k:"hobb",l:"hobbies",s:25,d:150},
-    {k:"dOut",l:"dates/social",s:25,d:100}]},
-  {key:"Pet",color:"#b07a8a",items:[
-    {k:"pFoo",l:"food/treats",s:10,d:75},{k:"vet_",l:"vet",s:25,d:75},
-    {k:"grmg",l:"grooming",s:10,d:60},{k:"pIns",l:"pet ins",s:10,d:50}]},
-  {key:"Bills",color:"#5b9ec9",items:[
-    {k:"phon",l:"phone",s:10,d:80},{k:"strm",l:"streaming",s:5,d:50},
-    {k:"apps",l:"apps/subs",s:5,d:30},{k:"clud",l:"cloud/software",s:5,d:20}]},
-  {key:"Insurance",color:"#8a7a5a",items:[
-    {k:"lIns",l:"life ins",s:10,d:50},{k:"uIns",l:"umbrella ins",s:10,d:30}]},
-  {key:"Gifts",color:"#7a6a8a",items:[
-    {k:"bday",l:"birthdays",s:10,d:50},{k:"holi",l:"holidays",s:25,d:100},
-    {k:"char",l:"donations",s:25,d:50}]},
-  {key:"Buffer",color:"#7a8a7a",items:[
-    {k:"misc",l:"misc/unplanned",s:50,d:300}]},
+/* ── Shared colors ── */
+const C_NEST="#2a9d8f", C_FV="#6a8ab5", C_RATE="#b8892a", C_MONTHS="#8b5fb0", C_YEARS="#7a8e5a";
+const C_EXP="#c47a3a", C_SWR="#7a6a8a", C_INV="#457bb5", C_AGE="#c95858", C_RETAGE="#3a9e6e";
+const C_MO="#c47a3a";
+
+/* ── Scenarios (override real-return + SWR + monthly spend) ── */
+const SCENARIOS = [
+  { key:"baseline", label:"Baseline (advisor 6.5%/3%)", realRet:35, swrPct:36, spendMo:15000, note:"6.5% nominal − 3% inflation = 3.5% real, 3.6% SWR." },
+  { key:"kids",     label:"With 2 kids",                 realRet:35, swrPct:36, spendMo:17000, note:"Same returns, +$2K/mo to cover kids while alive." },
+  { key:"lowret",   label:"Returns are 4%",              realRet:10, swrPct:30, spendMo:15000, note:"4% nominal − 3% infl = 1% real, 3% SWR. Brutal." },
+  { key:"highinfl", label:"Inflation +0.5%",             realRet:30, swrPct:35, spendMo:15000, note:"6.5% − 3.5% = 3% real, 3.5% SWR." },
 ];
-const ALL_ITEMS = CATS.flatMap(c => c.items);
-const defaultExp = () => { const o={}; ALL_ITEMS.forEach(i=>o[i.k]=i.d); return o; };
-const DEFAULT_EXP_SUM = ALL_ITEMS.reduce((a,i)=>a+i.d, 0);
-/** Build an exp object scaled so the monthly total ≈ targetMo. Rounds each item to nearest $25. */
-function scaledExp(targetMo){
-  const k = targetMo / DEFAULT_EXP_SUM;
-  const o = {};
-  ALL_ITEMS.forEach(it => { o[it.k] = it.d === 0 ? 0 : Math.max(0, Math.round(it.d * k / 25) * 25); });
-  return o;
+
+/* ── Helpers ── */
+const fmt=v=>(v<0?"−$":"$")+Math.round(Math.abs(v)).toLocaleString();
+const fmtM=v=>(v<0?"−$":"$")+(Math.abs(v)/1e6).toFixed(2)+"M";
+
+/* ── Atoms ── */
+function Pill({name,id,color}){
+  return <span data-var={id} style={{...st.pill,borderColor:color,color}}>{name}</span>;
 }
-const sumExp = (exp) => ALL_ITEMS.reduce((a,it)=>a + (exp?.[it.k] ?? it.d), 0);
-
-/* ─────────────  Constants  ───────────── */
-const PRESETS = {
-  "advisor-baseline": {
-    label: "Advisor baseline ($6M-ish)",
-    note: "Advisor's napkin: 55yr horizon, $15K/mo, 3% infl, 6.5% return, no kids.",
-    state: { curAge:35, retAge:35, lifeExp:90, curInv:6000000, contribMo:0, retNom:65, infl:30, exp:scaledExp(15000), kids:0, kidExtraMo:0, kidStart:35, kidEnd:53, midMult:100, oldMult:100, badSeq:false },
-  },
-  "advisor-2kids": {
-    label: "With 2 kids ($10M target)",
-    note: "Same horizon but +$2K/mo per kid age 35→53. Advisor said 6M won't work with kids.",
-    state: { curAge:35, retAge:35, lifeExp:90, curInv:10000000, contribMo:0, retNom:65, infl:30, exp:scaledExp(15000), kids:2, kidExtraMo:2000, kidStart:35, kidEnd:53, midMult:100, oldMult:90, badSeq:false },
-  },
-  "advisor-lowreturns": {
-    label: "If returns are 4% ($10M)",
-    note: "Stress test: returns 4% instead of 6.5%. Advisor: drops to 10M.",
-    state: { curAge:35, retAge:35, lifeExp:90, curInv:10000000, contribMo:0, retNom:40, infl:30, exp:scaledExp(15000), kids:0, kidExtraMo:0, kidStart:35, kidEnd:53, midMult:100, oldMult:90, badSeq:false },
-  },
-  "advisor-highinfl": {
-    label: "Inflation +0.5% ($7M)",
-    note: "Same as baseline but inflation 3.5%. Advisor: bumps to ~7M.",
-    state: { curAge:35, retAge:35, lifeExp:90, curInv:7000000, contribMo:0, retNom:65, infl:35, exp:scaledExp(15000), kids:0, kidExtraMo:0, kidStart:35, kidEnd:53, midMult:100, oldMult:100, badSeq:false },
-  },
-  "mati-current": {
-    label: "Mati's current plan",
-    note: "Working from current age toward 35. Solve for monthly contribution.",
-    state: { curAge:28, retAge:35, lifeExp:90, curInv:75000, contribMo:8000, retNom:65, infl:30, exp:defaultExp(), kids:2, kidExtraMo:1500, kidStart:35, kidEnd:53, midMult:100, oldMult:80, badSeq:false },
-  },
-};
-
-const DEFAULT_STATE = PRESETS["mati-current"].state;
-
-/* ─────────────  Helpers  ───────────── */
-const fmt$ = v => (v<0?"−$":"$") + Math.round(Math.abs(v)).toLocaleString();
-const fmt$M = v => "$" + (v/1e6).toFixed(2) + "M";
-const fmtPct = v => v.toFixed(2) + "%";
-
-function ageMultiplier(age, retAge, midMult, oldMult){
-  // 35→55 base (1.0). 55→70 midMult. 70+ oldMult.
-  if (age < 55) return 1.0;
-  if (age < 70) return midMult/100;
-  return oldMult/100;
+function Num({value,onChange,step=50,min=0,max=99999999,pre="$",suf=""}){
+  return(<span style={st.stepper}>
+    <button style={st.sBtn} onClick={()=>onChange(Math.min(max,value+step))}>
+      <svg width="10" height="4" viewBox="0 0 10 4"><path d="M1.5 3.5L5 .5L8.5 3.5" stroke="#b5ad9e" strokeWidth="1.3" fill="none" strokeLinecap="round"/></svg>
+    </button>
+    <span style={st.sVal}>{pre}{value.toLocaleString()}{suf}</span>
+    <button style={st.sBtn} onClick={()=>onChange(Math.max(min,value-step))}>
+      <svg width="10" height="4" viewBox="0 0 10 4"><path d="M1.5.5L5 3.5L8.5.5" stroke="#b5ad9e" strokeWidth="1.3" fill="none" strokeLinecap="round"/></svg>
+    </button>
+  </span>);
 }
+const Op=({c})=><span style={st.op}>{c}</span>;
 
-/** Simulate year by year. Returns {trajectory:[{age,portfolio,spend,contrib}], endBalance, depleteAge, peakNeeded}. */
-function simulate(s, opts={}){
-  const { curAge, retAge, lifeExp, curInv, contribMo, retNom, infl, kids, kidExtraMo, kidStart, kidEnd, midMult, oldMult } = s;
-  const baseMo = sumExp(s.exp);
-  const r = retNom/1000;       // nominal return (e.g. 65 → 6.5%)
-  const i = infl/1000;         // inflation
-  const overrideContrib = opts.contribMo != null ? opts.contribMo : contribMo;
-  const badSeq = opts.badSeq != null ? opts.badSeq : s.badSeq;
-  let portfolio = curInv;
-  const traj = [];
-  let depleteAge = null;
-  let peakNeeded = curInv;
-  for (let age = curAge; age <= lifeExp; age++){
-    const yrFromNow = age - curAge;
-    let yearReturn = r;
-    if (badSeq && age >= retAge && age < retAge+5) yearReturn = -0.02; // bad sequence stress
-    const inflMult = Math.pow(1+i, yrFromNow);
-    let contrib = 0, spend = 0;
-    if (age < retAge){
-      contrib = overrideContrib*12;
-      portfolio = portfolio*(1+yearReturn) + contrib;
-    } else {
-      const mult = ageMultiplier(age, retAge, midMult, oldMult);
-      let monthlySpend = baseMo * mult;
-      if (age >= kidStart && age < kidEnd) monthlySpend += kids * kidExtraMo;
-      spend = monthlySpend*12*inflMult;
-      portfolio = (portfolio - spend) * (1+yearReturn);
-    }
-    if (age === retAge) peakNeeded = Math.max(peakNeeded, portfolio);
-    if (depleteAge==null && portfolio < 0) depleteAge = age;
-    traj.push({ age, portfolio: Math.round(portfolio), spend: Math.round(spend), contrib: Math.round(contrib), inflMult });
-  }
-  return { trajectory: traj, endBalance: portfolio, depleteAge, peakNeeded };
-}
+const DEFAULT_STATE = { curAge:28, retAge:35, curInv:75000, realRet:35, swrPct:36, spendMo:8000 };
 
-/** Binary search the monthly contribution that ends with ~0 balance. */
-function solveContribution(s){
-  let lo = 0, hi = 100000;
-  for (let k=0; k<40; k++){
-    const mid = (lo+hi)/2;
-    const { endBalance } = simulate(s, { contribMo: mid });
-    if (endBalance > 0) hi = mid; else lo = mid;
-  }
-  return Math.round((lo+hi)/2);
-}
-
-/** Solve required nest egg at retAge to make balance hit zero at lifeExp (zero contrib post). */
-function solveNestEgg(s){
-  let lo = 0, hi = 50_000_000;
-  for (let k=0; k<40; k++){
-    const mid = (lo+hi)/2;
-    const trial = { ...s, curAge: s.retAge, curInv: mid, contribMo: 0 };
-    const { endBalance } = simulate(trial);
-    if (endBalance > 0) hi = mid; else lo = mid;
-  }
-  return Math.round((lo+hi)/2);
-}
-
-/* ─────────────  Atoms  ───────────── */
-function Stepper({ value, onChange, step=100, min=0, max=99999999, pre="$", suf="" }){
-  return (
-    <span style={S.stepper}>
-      <button style={S.sBtn} onClick={()=>onChange(Math.min(max,value+step))} aria-label="up">▲</button>
-      <span style={S.sVal}>{pre}{value.toLocaleString()}{suf}</span>
-      <button style={S.sBtn} onClick={()=>onChange(Math.max(min,value-step))} aria-label="down">▼</button>
-    </span>
-  );
-}
-
-/** Percent stepper. Stores value as per-mille int (so 65 = 6.5%) but displays as a normal percent. */
-function PctStepper({ value, onChange, step=1, min=0, max=300 }){
-  return (
-    <span style={S.stepper}>
-      <button style={S.sBtn} onClick={()=>onChange(Math.min(max,value+step))} aria-label="up">▲</button>
-      <span style={S.sVal}>{(value/10).toFixed(1)}%</span>
-      <button style={S.sBtn} onClick={()=>onChange(Math.max(min,value-step))} aria-label="down">▼</button>
-    </span>
-  );
-}
-
-function Field({ label, hint, children }){
-  return (
-    <div style={S.field}>
-      <div style={S.fLabel}>{label}</div>
-      {children}
-      {hint && <div style={S.fHint}>{hint}</div>}
-    </div>
-  );
-}
-
-function Stat({ label, value, color, big }){
-  return (
-    <div style={S.stat}>
-      <div style={S.statL}>{label}</div>
-      <div style={{...S.statV, color: color||"#1c1c1c", fontSize: big?32:20}}>{value}</div>
-    </div>
-  );
-}
-
-/* ─────────────  App  ───────────── */
 export default function App(){
-  // plan id from URL hash (e.g. #plan=advisor-mati). Default: shared room.
+  /* Plan id from hash */
   const planId = useMemo(()=>{
     const m = window.location.hash.match(/plan=([\w-]+)/);
     return m ? m[1] : "advisor-mati";
   },[]);
-  const [state, setState] = useState(DEFAULT_STATE);
+  const [s, setS] = useState(DEFAULT_STATE);
   const [sync, setSync] = useState({ live:false, last:null });
-  const [scenario, setScenario] = useState("mati-current");
   const skipSave = useRef(true);
 
-  /* Load + subscribe */
+  /* Supabase load + subscribe */
   useEffect(()=>{
     if (!isSupabase) return;
     let chan;
     (async ()=>{
       const { data } = await supabase.from("retire_plans").select("state, updated_at").eq("id", planId).maybeSingle();
-      if (data && data.state) {
+      if (data?.state){
         skipSave.current = true;
-        setState(prev => ({ ...prev, ...data.state }));
-        setSync({ live:true, last: data.updated_at });
-      } else {
-        setSync(s=>({ ...s, live:true }));
-      }
+        setS(prev => ({ ...prev, ...data.state }));
+        setSync({ live:true, last:data.updated_at });
+      } else setSync(p=>({ ...p, live:true }));
       chan = supabase.channel("rp:"+planId)
         .on("postgres_changes", { event:"*", schema:"public", table:"retire_plans", filter:`id=eq.${planId}` }, payload => {
-          const next = payload.new && payload.new.state;
-          if (next) {
+          if (payload.new?.state){
             skipSave.current = true;
-            setState(prev => ({ ...prev, ...next }));
-            setSync({ live:true, last: payload.new.updated_at });
+            setS(prev => ({ ...prev, ...payload.new.state }));
+            setSync({ live:true, last:payload.new.updated_at });
           }
         })
         .subscribe();
@@ -240,308 +71,328 @@ export default function App(){
     return ()=>{ if (chan) supabase.removeChannel(chan); };
   }, [planId]);
 
-  /* Debounced save on change */
+  /* Debounced save */
   useEffect(()=>{
     if (!isSupabase) return;
     if (skipSave.current){ skipSave.current = false; return; }
     const t = setTimeout(async ()=>{
-      const { data } = await supabase.from("retire_plans").upsert({ id: planId, state, updated_at: new Date().toISOString() }).select("updated_at").maybeSingle();
-      if (data) setSync(s=>({ ...s, last: data.updated_at }));
+      const { data } = await supabase.from("retire_plans").upsert({ id:planId, state:s, updated_at: new Date().toISOString() }).select("updated_at").maybeSingle();
+      if (data) setSync(p=>({ ...p, last:data.updated_at }));
     }, 400);
     return ()=>clearTimeout(t);
-  }, [state, planId]);
+  }, [s, planId]);
 
-  const set = (k,v)=> setState(p=>({...p,[k]:v}));
-  const applyPreset = (key) => {
-    setScenario(key);
+  const set = (k,v) => setS(p => ({ ...p, [k]: v }));
+  const applyScenario = (sc) => {
     skipSave.current = false;
-    setState(prev => ({ ...prev, ...PRESETS[key].state }));
+    setS(p => ({ ...p, realRet:sc.realRet, swrPct:sc.swrPct, spendMo:sc.spendMo }));
   };
 
-  /* Derived sims */
-  const sim     = useMemo(()=>simulate(state), [state]);
-  const simBad  = useMemo(()=>simulate(state, { badSeq:true }), [state]);
-  const reqNest = useMemo(()=>solveNestEgg(state), [state]);
-  const reqContrib = useMemo(()=>state.curAge < state.retAge ? solveContribution(state) : 0, [state]);
+  /* ── Derived math (today's $, REAL return — won't go negative, no inflation drift) ── */
+  const Y  = Math.max(0.0001, s.retAge - s.curAge);     // years till retirement
+  const n  = Math.round(Y*12);                          // months
+  const r  = s.realRet/1000;                            // real return decimal (35 → 3.5%)
+  const swr = s.swrPct/1000;                            // safe withdrawal rate (36 → 3.6%)
+  const rm = Math.pow(1+r, 1/12) - 1;                   // monthly real rate
+  const E  = s.spendMo*12;                              // annual retirement expenses (today's $)
+  const N  = swr > 0 ? E/swr : 0;                       // target nest egg (today's $)
+  const FVcur = s.curInv * Math.pow(1+r, Y);            // future value of current inv (today's $)
+  const Need = Math.max(0, N - FVcur);                  // gap to fund via contributions
+  const M = (rm > 0 && n > 0) ? (Need*rm)/(Math.pow(1+rm,n) - 1) : (n > 0 ? Need/n : 0);
+  const Total = M*n;
+  const onTrack = FVcur >= N && N > 0;
 
-  const yearsTo = state.retAge - state.curAge;
-  const inflMultRet = Math.pow(1 + state.infl/1000, yearsTo);
-  const baseMo = sumExp(state.exp);
-  const annualSpendNow = baseMo*12;
-  const annualSpendRetNom = annualSpendNow * inflMultRet;
-  const fvCur = state.curInv * Math.pow(1 + state.retNom/1000, yearsTo);
+  /* ── Connections (from-pill → to-pill) ── */
+  const conns = [
+    {from:"hero-M",  to:"eq1-M",   color:C_RATE},
+    {from:"eq1-N",   to:"eq2-N",   color:C_NEST},
+    {from:"eq1-FV",  to:"eq3-FV",  color:C_FV},
+    {from:"eq1-rm",  to:"eq6-rm",  color:C_RATE},
+    {from:"eq1-n",   to:"eq5-n",   color:C_MONTHS},
+    {from:"eq2-E",   to:"eq4-E",   color:C_EXP},
+    {from:"eq2-SWR", to:"def-SWR", color:C_SWR},
+    {from:"eq3-Inv", to:"def-Inv", color:C_INV},
+    {from:"eq3-r",   to:"def-r",   color:C_RATE},
+    {from:"eq3-Y",   to:"eq5-Y",   color:C_YEARS},
+    {from:"eq4-Mo",  to:"def-Mo",  color:C_MO},
+    {from:"eq6-r",   to:"def-r",   color:C_RATE},
+    {from:"eq5-RA",  to:"def-RA",  color:C_RETAGE},
+    {from:"eq5-CA",  to:"def-CA",  color:C_AGE},
+  ];
 
-  /* Per-category monthly totals */
-  const catTotals = useMemo(()=>{
-    const o = {};
-    CATS.forEach(c => { o[c.key] = c.items.reduce((a,it)=>a + (state.exp?.[it.k] ?? it.d), 0); });
-    return o;
-  }, [state.exp]);
-  const setItem = (k,v) => setState(p => ({ ...p, exp: { ...(p.exp||defaultExp()), [k]: v } }));
-
-  const chartData = sim.trajectory.map((d,idx)=>({
-    age: d.age,
-    portfolio: d.portfolio,
-    badSeq: simBad.trajectory[idx]?.portfolio,
-    spend: d.spend,
-  }));
-
-  const ok = sim.endBalance >= 0;
-
-  /* Mermaid: equation backbones — show how every value derives from inputs. */
-  const r = (state.retNom/10).toFixed(1);
-  const i = (state.infl/10).toFixed(1);
-  const baseAnnual = baseMo*12;
-  const mermaidChart = `flowchart TB
-    classDef eq fill:#fff,stroke:#1c1c1c,stroke-width:1.5px,color:#1c1c1c
-    classDef inp fill:#fafaf7,stroke:#b5ad9e,stroke-dasharray:3 3,color:#1c1c1c
-    classDef nest fill:#e8f4ee,stroke:#2a9d8f,color:#1c1c1c
-    classDef warn fill:#fff8e6,stroke:#b8892a,color:#1c1c1c
-    classDef out fill:${ok?"#e8f4ee":"#fbe8e8"},stroke:${ok?"#3a9e6e":"#c95858"},color:#1c1c1c
-
-    subgraph IN["INPUTS (today)"]
-      direction LR
-      I1["curAge = ${state.curAge}"]:::inp
-      I2["retAge = ${state.retAge}"]:::inp
-      I3["lifeExp = ${state.lifeExp}"]:::inp
-      I4["curInv = ${fmt$(state.curInv)}"]:::inp
-      I5["C = ${fmt$(state.contribMo)}/mo"]:::inp
-      I6["r = ${r}% /yr<br/>nominal return"]:::inp
-      I7["i = ${i}% /yr<br/>inflation"]:::inp
-      I8["BaseMo = ${fmt$(baseMo)}/mo<br/>(sum of itemized)"]:::inp
-    end
-
-    EQI["<b>Inflation factor</b><br/>Infl(t) = (1 + i)^(t − curAge)<br/>at t=retAge: (1+${i}%)^${yearsTo} = ${inflMultRet.toFixed(3)}×"]:::eq
-    EQS["<b>Stage multiplier by age</b><br/>age &lt; 55 → 100%<br/>55 ≤ age &lt; 70 → ${state.midMult}%<br/>age ≥ 70 → ${state.oldMult}%"]:::eq
-    EQK["<b>Kids cost</b><br/>Kids(age) = ${state.kids} × ${fmt$(state.kidExtraMo)}/mo × 12<br/>if ${state.kidStart} ≤ age &lt; ${state.kidEnd}<br/>= ${fmt$(state.kids*state.kidExtraMo*12)}/yr"]:::eq
-
-    EQSPEND["<b>Annual spend at age t</b><br/>Spend(t) = BaseMo × 12 × Infl(t) × Stage(age) + Kids(age)<br/>= ${fmt$(baseAnnual)} × Infl(t) × Stage + Kids<br/>at retAge: ≈ ${fmt$(baseAnnual*inflMultRet)}/yr"]:::eq
-
-    EQACC["<b>Accumulation (curAge → retAge)</b><br/>P(t+1) = P(t) × (1+r) + 12·C<br/>P(curAge) = curInv = ${fmt$(state.curInv)}<br/>→ P(retAge) ≈ ${fmt$(fvCur)}"]:::eq
-    EQRET["<b>Drawdown (retAge → lifeExp)</b><br/>P(t+1) = (P(t) − Spend(t)) × (1+r)<br/>r = ${r}%, run ${state.lifeExp-state.retAge} years"]:::eq
-
-    OUT["<b>End balance @ age ${state.lifeExp}</b><br/>P(${state.lifeExp}) = ${fmt$M(sim.endBalance)}<br/>${ok?"✓ funded":"✗ depletes at age "+sim.depleteAge}"]:::out
-
-    SOLVE_N["<b>Required nest egg N*</b><br/>solve P(retAge)=N*, C=0 → P(lifeExp)=0<br/>(binary search)<br/>N* = ${fmt$M(reqNest)}"]:::nest
-    SOLVE_C["<b>Required contribution C*</b><br/>solve given C → P(lifeExp)=0<br/>(binary search)<br/>C* = ${fmt$(reqContrib)}/mo"]:::warn
-
-    I7 --> EQI
-    I1 --> EQI
-    I2 --> EQI
-    I8 --> EQSPEND
-    EQI --> EQSPEND
-    EQS --> EQSPEND
-    EQK --> EQSPEND
-    I4 --> EQACC
-    I5 --> EQACC
-    I6 --> EQACC
-    EQACC --> EQRET
-    EQSPEND --> EQRET
-    I6 --> EQRET
-    EQRET --> OUT
-    OUT -.gap.-> SOLVE_N
-    OUT -.gap.-> SOLVE_C
-  `;
+  const cRef = useRef(null), svgRef = useRef(null);
+  useEffect(()=>{
+    const draw = () => {
+      const cont = cRef.current, svg = svgRef.current;
+      if (!cont || !svg) return;
+      svg.setAttribute("width", cont.scrollWidth); svg.setAttribute("height", cont.scrollHeight);
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      const cr = cont.getBoundingClientRect();
+      const pos = id => { const el = cont.querySelector('[data-var="'+id+'"]'); if (!el) return null; const r = el.getBoundingClientRect(); return { cx: r.left-cr.left+r.width/2, top: r.top-cr.top, bot: r.bottom-cr.top }; };
+      conns.forEach(conn => {
+        const a = pos(conn.from), b = pos(conn.to); if (!a || !b) return;
+        const x1=a.cx, y1=a.bot+1, x2=b.cx, y2=b.top-1, dy=y2-y1; if (dy < 6) return;
+        const cp = Math.min(Math.max(18, dy*0.4), 120);
+        const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+        path.setAttribute("d", "M"+x1+","+y1+" C"+x1+","+(y1+cp)+" "+x2+","+(y2-cp)+" "+x2+","+y2);
+        path.setAttribute("stroke", conn.color); path.setAttribute("stroke-width","1.5");
+        path.setAttribute("fill","none"); path.setAttribute("opacity","0.38"); svg.appendChild(path);
+        const sz = 4.5; const tri = document.createElementNS("http://www.w3.org/2000/svg","polygon");
+        tri.setAttribute("points", x2+","+y2+" "+(x2-sz)+","+(y2-sz*1.7)+" "+(x2+sz)+","+(y2-sz*1.7));
+        tri.setAttribute("fill", conn.color); tri.setAttribute("opacity","0.45"); svg.appendChild(tri);
+      });
+    };
+    const raf = () => requestAnimationFrame(draw);
+    const timer = setTimeout(raf, 120);
+    window.addEventListener("resize", raf);
+    return () => { clearTimeout(timer); window.removeEventListener("resize", raf); };
+  });
 
   return (
-    <div style={S.pg}>
+    <div style={st.pg}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@300;400;600&family=DM+Sans:wght@400;500;600;700&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0}
-        body{background:#f6f4f0;font-family:'DM Sans',system-ui,sans-serif;color:#1c1c1c}
-        button{background:none;border:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+        @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@400;500;600&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0}body{background:#f6f4f0}
+        button{background:none;border:none;cursor:pointer;-webkit-tap-highlight-color:transparent;font-family:inherit}
       `}</style>
 
-      {/* Header */}
-      <div style={S.header}>
-        <div style={S.hRow}>
-          <div>
-            <div style={S.kicker}>RETIRE AT 35 · LIVING DOCUMENT</div>
-            <div style={S.title}>Year-by-year retirement plan</div>
+      <div style={st.hero}>
+        <div style={st.hL}>REQUIRED MONTHLY CONTRIBUTION</div>
+        <div data-var="hero-M" style={st.hN}>{onTrack?"$0":fmt(M)}</div>
+        <div style={st.hS}>
+          {onTrack
+            ? <>You're already on track. Projected nest egg: <b>{fmtM(FVcur)}</b> at age {s.retAge}.</>
+            : <>Invest <b>{fmt(M)}/mo</b> for <b>{Y.toFixed(1)} yrs</b> ({n} mo) &nbsp;·&nbsp; Total contributed: <b>{fmtM(Total)}</b></>}
+        </div>
+        <div style={st.hMeta}>
+          Target nest egg: <b>{fmtM(N)}</b> &nbsp;·&nbsp; Today's investments grow to <b>{fmtM(FVcur)}</b> &nbsp;·&nbsp; Gap: <b>{fmtM(Need)}</b>
+        </div>
+        <div style={st.note}>All values in today's dollars using a real (inflation-adjusted) return. Never depletes by construction (perpetual SWR).</div>
+        <div style={st.syncRow}>
+          <span style={{...st.dot, background: sync.live?"#3a9e6e":"#c0b8a8"}}/>
+          <span style={st.syncTxt}>{isSupabase ? (sync.live ? "LIVE · synced with advisor" : "connecting…") : "local only"} · plan <b>{planId}</b></span>
+        </div>
+      </div>
+
+      <div ref={cRef} style={st.board}>
+        <svg ref={svgRef} style={st.svg}/>
+
+        {/* Scenarios */}
+        <div style={st.rc}><div style={st.eq}>
+          <div style={st.tag}>Advisor scenarios (one click to apply)</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
+            {SCENARIOS.map(sc => {
+              const active = s.realRet===sc.realRet && s.swrPct===sc.swrPct && s.spendMo===sc.spendMo;
+              const nest = (sc.spendMo*12)/(sc.swrPct/1000);
+              return (
+                <button key={sc.key} onClick={()=>applyScenario(sc)} style={{...st.scBtn, ...(active?st.scBtnA:{})}}>
+                  <div style={{fontSize:12,fontWeight:600}}>{sc.label}</div>
+                  <div style={{fontSize:10,color:"#888",marginTop:2}}>{sc.note}</div>
+                  <div style={{fontSize:11,marginTop:4,color:"#1c1c1c"}}>Implied nest egg: <b>{fmtM(nest)}</b></div>
+                </button>
+              );
+            })}
           </div>
-          <div style={S.syncBox}>
-            <span style={{...S.dot, background: sync.live ? "#3a9e6e" : "#c0b8a8"}}/>
-            <div>
-              <div style={S.syncL}>{isSupabase ? (sync.live ? "LIVE · synced" : "connecting…") : "local only"}</div>
-              <div style={S.syncId}>plan: <b>{planId}</b></div>
-            </div>
+        </div></div>
+
+        {/* Equation 1: Monthly Contribution */}
+        <div style={st.rc}><div style={st.eq}>
+          <div style={st.tag}>Monthly Contribution Required</div>
+          <div style={st.ml}>
+            <span data-var="eq1-M" style={st.dv}>M</span> <Op c="="/>{" "}
+            <span style={st.frac}>
+              <span style={st.fracTop}>(<Pill name="Nest Egg" id="eq1-N" color={C_NEST}/> <Op c="−"/> <Pill name="FV of Current" id="eq1-FV" color={C_FV}/>) <Op c="×"/> <Pill name="r/mo" id="eq1-rm" color={C_RATE}/></span>
+              <span style={st.fracBar}/>
+              <span style={st.fracBot}>(1 + <Pill name="r/mo" id="eq1-rm-b" color={C_RATE}/>)<sup>n</sup> <Op c="−"/> 1</span>
+            </span>
+            <Op c="·"/>
+            <span style={st.it2}>n = </span><Pill name="Months" id="eq1-n" color={C_MONTHS}/>
           </div>
-        </div>
-      </div>
+          <div style={st.rr}>= {fmt(M)}/mo &nbsp;·&nbsp; total {fmtM(Total)} over {n} mo</div>
+        </div></div>
 
-      {/* Top KPIs */}
-      <div style={S.kpis}>
-        <Stat label="REQUIRED NEST EGG @ RETIRE" value={fmt$M(reqNest)} color="#2a9d8f" big/>
-        <Stat label="PROJECTED PORTFOLIO @ RETIRE" value={fmt$M(fvCur)} color={fvCur>=reqNest?"#3a9e6e":"#c95858"} big/>
-        <Stat label={`MONTHLY CONTRIB. NEEDED (to age ${state.retAge})`} value={fmt$(reqContrib)} color="#b8892a" big/>
-        <Stat label={`END BALANCE @ AGE ${state.lifeExp}`} value={fmt$M(sim.endBalance)} color={ok?"#3a9e6e":"#c95858"} big/>
-      </div>
+        {/* Equation 2: Nest Egg */}
+        <div style={st.rc}><div style={st.eq}>
+          <div style={st.tag}>Target Nest Egg (4% rule style)</div>
+          <div style={st.ml}>
+            <Pill name="Nest Egg" id="eq2-N" color={C_NEST}/> <Op c="="/>{" "}
+            <span style={st.frac}>
+              <span style={st.fracTop}><Pill name="Annual Expenses" id="eq2-E" color={C_EXP}/></span>
+              <span style={st.fracBar}/>
+              <span style={st.fracBot}><Pill name="SWR" id="eq2-SWR" color={C_SWR}/></span>
+            </span>
+          </div>
+          <div style={st.rr}>= {fmtM(N)} &nbsp;·&nbsp; ≈ {(s.swrPct/10).toFixed(1)}% withdrawal × {fmtM(N)} = {fmt(N*swr)}/yr</div>
+        </div></div>
 
-      {/* Scenario switcher */}
-      <div style={S.scenarios}>
-        <div style={S.kicker}>ADVISOR SCENARIOS</div>
-        <div style={S.presetRow}>
-          {Object.entries(PRESETS).map(([k,p])=>(
-            <button key={k} onClick={()=>applyPreset(k)} style={{...S.preset, ...(scenario===k?S.presetActive:{})}}>
-              <div style={S.presetLabel}>{p.label}</div>
-              <div style={S.presetNote}>{p.note}</div>
-            </button>
-          ))}
-        </div>
-      </div>
+        {/* Equation 3: FV of current investments */}
+        <div style={st.rc}><div style={st.eq}>
+          <div style={st.tag}>Future Value of Current Investments</div>
+          <div style={st.ml}>
+            <Pill name="FV of Current" id="eq3-FV" color={C_FV}/> <Op c="="/>{" "}
+            <Pill name="Investments" id="eq3-Inv" color={C_INV}/> <Op c="×"/>{" "}
+            (1 + <Pill name="r" id="eq3-r" color={C_RATE}/>)<sup style={{fontSize:10}}>
+              <Pill name="Years" id="eq3-Y" color={C_YEARS}/>
+            </sup>
+          </div>
+          <div style={st.rr}>= {fmt(s.curInv)} × (1+{(s.realRet/10).toFixed(1)}%)^{Y.toFixed(1)} = {fmtM(FVcur)}</div>
+        </div></div>
 
-      {/* Inputs */}
-      <div style={S.section}>
-        <div style={S.sectionTitle}>Plan inputs</div>
-        <div style={S.grid}>
-          <Field label="Current age"><Stepper value={state.curAge} onChange={v=>set("curAge",v)} step={1} min={1} max={100} pre="" suf=" yr"/></Field>
-          <Field label="Retirement age"><Stepper value={state.retAge} onChange={v=>set("retAge",v)} step={1} min={state.curAge} max={100} pre="" suf=" yr"/></Field>
-          <Field label="Life expectancy"><Stepper value={state.lifeExp} onChange={v=>set("lifeExp",v)} step={1} min={state.retAge} max={120} pre="" suf=" yr"/></Field>
-          <Field label="Investments today"><Stepper value={state.curInv} onChange={v=>set("curInv",v)} step={5000}/></Field>
-          <Field label="Monthly contribution (now → retire)" hint={`Solver says: ${fmt$(reqContrib)}/mo to fully fund`}><Stepper value={state.contribMo} onChange={v=>set("contribMo",v)} step={250}/></Field>
-          <Field label="Nominal return /yr" hint="Steps in 0.1%"><PctStepper value={state.retNom} onChange={v=>set("retNom",v)} step={1} min={0} max={300}/></Field>
-          <Field label="Inflation /yr" hint="Steps in 0.1%"><PctStepper value={state.infl} onChange={v=>set("infl",v)} step={1} min={0} max={200}/></Field>
-          <Field label="Base spend (today's $/mo)" hint={`Sum of itemized expenses below. At retire age ≈ ${fmt$(baseMo*inflMultRet)}/mo nominal`}>
-            <span style={{...S.sVal, display:"inline-block", minWidth:120}}>{fmt$(baseMo)}/mo</span>
-          </Field>
-        </div>
-      </div>
+        {/* Equation 4: Annual Expenses (single $/mo) */}
+        <div style={st.rc}><div style={st.eq}>
+          <div style={st.tag}>Annual Retirement Expenses (today's $)</div>
+          <div style={st.ml}>
+            <Pill name="Annual Expenses" id="eq4-E" color={C_EXP}/> <Op c="="/>{" "}
+            <Pill name="Monthly Spend" id="eq4-Mo" color={C_MO}/> <Op c="×"/> <span style={st.opNum}>12</span>
+          </div>
+          <div style={st.rr}>= {fmt(s.spendMo)}/mo × 12 = {fmt(E)}/yr</div>
+        </div></div>
 
-      {/* Itemized expenses */}
-      <div style={S.section}>
-        <div style={S.sectionTitle}>Retirement expenses (today's $) · total {fmt$(baseMo)}/mo · {fmt$(baseMo*12)}/yr</div>
-        <div style={S.catGrid}>
-          {CATS.map(cat => (
-            <div key={cat.key} style={{...S.catBox, borderLeft:`3px solid ${cat.color}`}}>
-              <div style={S.catHead}>
-                <span style={{...S.catName, color:cat.color}}>{cat.key}</span>
-                <span style={S.catTot}>{fmt$(catTotals[cat.key])}/mo</span>
-              </div>
-              <div style={S.itemGrid}>
-                {cat.items.map(it => (
-                  <div key={it.k} style={S.itemRow}>
-                    <span style={S.itemL}>{it.l}</span>
-                    <Stepper value={state.exp?.[it.k] ?? it.d} onChange={v=>setItem(it.k,v)} step={it.s}/>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+        {/* Equation 5: Time horizon + Plan inputs */}
+        <div style={st.rc}><div style={st.eq}>
+          <div style={st.tag}>Time Horizon &amp; Plan Inputs</div>
+          <div style={{...st.ml,fontSize:14,gap:"6px 10px"}}>
+            <span style={{display:"inline-flex",alignItems:"center",gap:6}}>
+              <Pill name="Years" id="eq5-Y" color={C_YEARS}/> <Op c="="/>
+              <Pill name="Retire Age" id="eq5-RA" color={C_RETAGE}/> <Op c="−"/>
+              <Pill name="Current Age" id="eq5-CA" color={C_AGE}/>
+              <span style={st.eqResult}>= {Y.toFixed(1)} yrs</span>
+            </span>
+            <span style={{display:"inline-flex",alignItems:"center",gap:6}}>
+              <Pill name="Months" id="eq5-n" color={C_MONTHS}/> <Op c="="/>
+              <Pill name="Years" id="eq5-Y-b" color={C_YEARS}/> <Op c="×"/> 12
+              <span style={st.eqResult}>= {n} mo</span>
+            </span>
+          </div>
+          <div style={{...st.subEq,marginTop:10,gap:"8px 14px",flexWrap:"wrap"}}>
+            <span style={st.inlineItem}>
+              <span style={st.gL2}>current age</span>
+              <Num value={s.curAge} onChange={v=>set("curAge",v)} step={1} min={1} max={s.retAge-1} pre="" suf=" yr"/>
+            </span>
+            <span data-var="def-CA" style={{...st.inlineItem,...st.defBox,borderColor:C_AGE}}>
+              <span style={{...st.gL2,color:C_AGE}}>Current Age</span>
+              <span style={st.defVal}>{s.curAge} yr</span>
+            </span>
+            <span style={st.inlineItem}>
+              <span style={st.gL2}>retire age</span>
+              <Num value={s.retAge} onChange={v=>set("retAge",v)} step={1} min={s.curAge+1} max={80} pre="" suf=" yr"/>
+            </span>
+            <span data-var="def-RA" style={{...st.inlineItem,...st.defBox,borderColor:C_RETAGE}}>
+              <span style={{...st.gL2,color:C_RETAGE}}>Retire Age</span>
+              <span style={st.defVal}>{s.retAge} yr</span>
+            </span>
+            <span style={st.inlineItem}>
+              <span style={st.gL2}>investments today</span>
+              <Num value={s.curInv} onChange={v=>set("curInv",v)} step={5000} pre="$"/>
+            </span>
+            <span data-var="def-Inv" style={{...st.inlineItem,...st.defBox,borderColor:C_INV}}>
+              <span style={{...st.gL2,color:C_INV}}>Investments</span>
+              <span style={st.defVal}>{fmt(s.curInv)}</span>
+            </span>
+            <span style={st.inlineItem}>
+              <span style={st.gL2}>monthly spend</span>
+              <Num value={s.spendMo} onChange={v=>set("spendMo",v)} step={250} pre="$"/>
+            </span>
+            <span data-var="def-Mo" style={{...st.inlineItem,...st.defBox,borderColor:C_MO}}>
+              <span style={{...st.gL2,color:C_MO}}>Monthly Spend</span>
+              <span style={st.defVal}>{fmt(s.spendMo)}</span>
+            </span>
+            <span style={st.inlineItem}>
+              <span style={st.gL2}>real return /yr</span>
+              <Num value={s.realRet} onChange={v=>set("realRet",v)} step={5} min={0} max={200} pre="" suf="‰"/>
+            </span>
+            <span data-var="def-r" style={{...st.inlineItem,...st.defBox,borderColor:C_RATE}}>
+              <span style={{...st.gL2,color:C_RATE}}>r (real)</span>
+              <span style={st.defVal}>{(s.realRet/10).toFixed(1)}% /yr</span>
+            </span>
+            <span style={st.inlineItem}>
+              <span style={st.gL2}>safe withdrawal</span>
+              <Num value={s.swrPct} onChange={v=>set("swrPct",v)} step={1} min={10} max={100} pre="" suf="‰"/>
+            </span>
+            <span data-var="def-SWR" style={{...st.inlineItem,...st.defBox,borderColor:C_SWR}}>
+              <span style={{...st.gL2,color:C_SWR}}>SWR</span>
+              <span style={st.defVal}>{(s.swrPct/10).toFixed(1)}%</span>
+            </span>
+          </div>
+          <div style={{fontSize:10,color:"#aaa",marginTop:8,fontStyle:"italic"}}>
+            ‰ stepper is per-mille (35 = 3.5% real return). Real return = nominal − inflation. SWR 4% is the Trinity Study rule of thumb, advisor uses ~3.6% for 55-year horizon.
+          </div>
+        </div></div>
 
-      <div style={S.section}>
-        <div style={S.sectionTitle}>Life stages</div>
-        <div style={S.grid}>
-          <Field label="# of kids"><Stepper value={state.kids} onChange={v=>set("kids",v)} step={1} min={0} max={6} pre="" suf=""/></Field>
-          <Field label="Extra spend per kid /mo (today's $)"><Stepper value={state.kidExtraMo} onChange={v=>set("kidExtraMo",v)} step={250}/></Field>
-          <Field label="Kid cost starts at age"><Stepper value={state.kidStart} onChange={v=>set("kidStart",v)} step={1} min={20} max={70} pre="" suf=" yr"/></Field>
-          <Field label="Kid cost ends at age"><Stepper value={state.kidEnd} onChange={v=>set("kidEnd",v)} step={1} min={state.kidStart} max={80} pre="" suf=" yr"/></Field>
-          <Field label="Mid-life multiplier (age 55-70)" hint="% of base spend"><Stepper value={state.midMult} onChange={v=>set("midMult",v)} step={5} min={0} max={200} pre="" suf="%"/></Field>
-          <Field label="Old-age multiplier (age 70+)" hint="% of base spend"><Stepper value={state.oldMult} onChange={v=>set("oldMult",v)} step={5} min={0} max={200} pre="" suf="%"/></Field>
-        </div>
-      </div>
+        {/* Equation 6: monthly rate from annual */}
+        <div style={st.rc}><div style={st.eq}>
+          <div style={st.tag}>Monthly Rate Conversion</div>
+          <div style={st.ml}>
+            <Pill name="r/mo" id="eq6-rm" color={C_RATE}/> <Op c="="/>{" "}
+            (1 + <Pill name="r" id="eq6-r" color={C_RATE}/>)<sup>1/12</sup> <Op c="−"/> 1
+          </div>
+          <div style={st.rr}>= {(rm*100).toFixed(4)}% /mo</div>
+        </div></div>
 
-      {/* Chart */}
-      <div style={S.section}>
-        <div style={S.sectionTitle}>Portfolio over time (nominal $)</div>
-        <div style={{height:340, marginTop:8}}>
-          <ResponsiveContainer>
-            <LineChart data={chartData} margin={{top:10,right:20,left:0,bottom:0}}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e8e4dd"/>
-              <XAxis dataKey="age" tick={{fontSize:11}} label={{value:"age", position:"insideBottomRight", offset:-5, fontSize:11, fill:"#888"}}/>
-              <YAxis tick={{fontSize:11}} tickFormatter={v=>"$"+(v/1e6).toFixed(1)+"M"}/>
-              <Tooltip formatter={(v)=>fmt$(v)} labelFormatter={l=>"age "+l}/>
-              <Legend wrapperStyle={{fontSize:11}}/>
-              <ReferenceLine x={state.retAge} stroke="#b8892a" strokeDasharray="4 4" label={{value:"retire", fontSize:10, fill:"#b8892a"}}/>
-              <ReferenceLine y={0} stroke="#c95858" strokeWidth={1}/>
-              <Line type="monotone" dataKey="portfolio" name="portfolio (avg returns)" stroke="#2a9d8f" strokeWidth={2.5} dot={false}/>
-              <Line type="monotone" dataKey="badSeq" name="bad sequence (-2% first 5yrs of retire)" stroke="#c95858" strokeWidth={1.5} strokeDasharray="4 4" dot={false}/>
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-        <div style={S.chartFoot}>
-          {ok ? <span style={{color:"#3a9e6e"}}>✓ Funded through age {state.lifeExp}.</span> : <span style={{color:"#c95858"}}>✗ Depletes at age {sim.depleteAge}.</span>}
-          {simBad.depleteAge && simBad.depleteAge !== sim.depleteAge && <span style={{color:"#c95858", marginLeft:12}}>Bad sequence depletes at {simBad.depleteAge}.</span>}
-        </div>
+        {/* Summary card for advisor */}
+        <div style={{...st.rc,marginTop:18}}><div style={{...st.eq,background:"#1c1c1c",color:"#e8e4dd"}}>
+          <div style={{...st.tag,color:"#888"}}>Plan Summary (for advisor)</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12,marginTop:8,fontFamily:"'DM Sans',sans-serif"}}>
+            <div><div style={st.sumK}>Years to retirement</div><div style={st.sumV}>{Y.toFixed(1)} yrs</div></div>
+            <div><div style={st.sumK}>Annual expenses</div><div style={st.sumV}>{fmt(E)}</div></div>
+            <div><div style={st.sumK}>Target nest egg</div><div style={st.sumV}>{fmtM(N)}</div></div>
+            <div><div style={st.sumK}>Today's investments</div><div style={st.sumV}>{fmt(s.curInv)}</div></div>
+            <div><div style={st.sumK}>Projected at retire age</div><div style={st.sumV}>{fmtM(FVcur)}</div></div>
+            <div><div style={st.sumK}>Funding gap</div><div style={st.sumV}>{fmtM(Need)}</div></div>
+            <div><div style={st.sumK}>Monthly contribution</div><div style={{...st.sumV,color:"#ffd28a"}}>{fmt(M)}</div></div>
+            <div><div style={st.sumK}>Total contributed</div><div style={st.sumV}>{fmtM(Total)}</div></div>
+            <div><div style={st.sumK}>Real return assumption</div><div style={st.sumV}>{(s.realRet/10).toFixed(1)}% /yr</div></div>
+            <div><div style={st.sumK}>SWR assumption</div><div style={st.sumV}>{(s.swrPct/10).toFixed(1)}%</div></div>
+          </div>
+          <div style={{fontSize:10,color:"#888",marginTop:14,lineHeight:1.6}}>
+            Share with advisor: <code style={{background:"#2a2a2a",padding:"2px 6px",borderRadius:3,color:"#ffd28a"}}>{window.location.origin + window.location.pathname + "#plan=" + planId}</code><br/>
+            Both edit live. Last sync: {sync.last ? new Date(sync.last).toLocaleString() : "—"}.
+          </div>
+        </div></div>
       </div>
-
-      {/* Mermaid diagram */}
-      <div style={S.section}>
-        <div style={S.sectionTitle}>Model flow (live)</div>
-        <Mermaid chart={mermaidChart}/>
-      </div>
-
-      {/* Summary table for advisor */}
-      <div style={{...S.section, background:"#1c1c1c", color:"#e8e4dd"}}>
-        <div style={{...S.sectionTitle, color:"#888"}}>Plan summary for advisor</div>
-        <div style={S.sumGrid}>
-          <Stat label="Years to retirement" value={yearsTo+" yrs"}/>
-          <Stat label="Years in retirement" value={(state.lifeExp-state.retAge)+" yrs"}/>
-          <Stat label="Annual spend today" value={fmt$(annualSpendNow)}/>
-          <Stat label="Annual spend at retire (nominal)" value={fmt$(annualSpendRetNom)}/>
-          <Stat label="Required nest egg @ retire" value={fmt$M(reqNest)}/>
-          <Stat label="Projected portfolio @ retire" value={fmt$M(fvCur)}/>
-          <Stat label="Funding gap" value={fmt$M(Math.max(0, reqNest - fvCur))}/>
-          <Stat label="Required monthly contribution" value={fmt$(reqContrib)}/>
-          <Stat label="Nominal return assumption" value={(state.retNom/10).toFixed(1)+"% /yr"}/>
-          <Stat label="Inflation assumption" value={(state.infl/10).toFixed(1)+"% /yr"}/>
-          <Stat label="Real return (approx)" value={fmtPct(state.retNom/10 - state.infl/10)}/>
-          <Stat label="End balance (avg returns)" value={fmt$M(sim.endBalance)}/>
-          <Stat label="End balance (bad sequence)" value={fmt$M(simBad.endBalance)}/>
-          <Stat label="Kids" value={`${state.kids} × ${fmt$(state.kidExtraMo)}/mo`}/>
-        </div>
-        <div style={S.sumNote}>
-          Share this URL with the advisor: <code style={S.code}>{window.location.origin + window.location.pathname + "#plan=" + planId}</code><br/>
-          Both edit, both see updates live. Last sync: {sync.last ? new Date(sync.last).toLocaleString() : "—"}.
-        </div>
-      </div>
-
-      <div style={{height:48}}/>
+      <div style={{height:32}}/>
     </div>
   );
 }
 
-/* ─────────────  Styles  ───────────── */
-const S = {
-  pg:{minHeight:"100vh",background:"#f6f4f0",maxWidth:1080,margin:"0 auto",padding:"0 16px 24px"},
-  header:{padding:"20px 0 14px",borderBottom:"1px solid #e8e4dd",position:"sticky",top:0,background:"#f6f4f0",zIndex:10},
-  hRow:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,flexWrap:"wrap"},
-  kicker:{fontSize:10,letterSpacing:"0.16em",color:"#a8a08e",fontWeight:600},
-  title:{fontFamily:"'Source Serif 4',Georgia,serif",fontSize:"clamp(22px,3.6vw,30px)",fontWeight:300,marginTop:2},
-  syncBox:{display:"flex",alignItems:"center",gap:8,background:"#fff",padding:"8px 12px",borderRadius:8,border:"1px solid #e8e4dd"},
-  dot:{width:8,height:8,borderRadius:"50%",display:"inline-block"},
-  syncL:{fontSize:10,letterSpacing:"0.1em",color:"#888",fontWeight:600},
-  syncId:{fontSize:11,color:"#1c1c1c"},
-  kpis:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10,marginTop:14},
-  scenarios:{marginTop:18},
-  presetRow:{display:"flex",gap:8,overflowX:"auto",paddingBottom:8,marginTop:8},
-  preset:{flex:"0 0 240px",textAlign:"left",background:"#fff",border:"1px solid #e8e4dd",borderRadius:8,padding:"10px 12px"},
-  presetActive:{borderColor:"#2a9d8f",background:"#eaf6f3"},
-  presetLabel:{fontSize:13,fontWeight:600,marginBottom:3},
-  presetNote:{fontSize:11,color:"#888",lineHeight:1.4},
-  section:{background:"#fff",borderRadius:10,padding:"14px 16px",marginTop:14,border:"1px solid #ece7df"},
-  sectionTitle:{fontSize:11,letterSpacing:"0.14em",color:"#a8a08e",fontWeight:600,textTransform:"uppercase",marginBottom:10},
-  grid:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:14},
-  field:{display:"flex",flexDirection:"column",gap:4},
-  fLabel:{fontSize:11,color:"#777",fontWeight:500},
-  fHint:{fontSize:10,color:"#aaa",fontStyle:"italic"},
-  stepper:{display:"inline-flex",alignItems:"center",gap:4},
-  sBtn:{padding:"4px 8px",background:"#f0ede8",borderRadius:4,fontSize:10,color:"#888",minWidth:28},
-  sVal:{fontSize:14,fontWeight:600,background:"#fff",border:"1px solid #e0dbd3",borderRadius:4,padding:"4px 10px",minWidth:90,textAlign:"center"},
-  stat:{background:"#fff",borderRadius:8,padding:"10px 12px",border:"1px solid #ece7df"},
-  statL:{fontSize:9.5,letterSpacing:"0.1em",color:"#a8a08e",fontWeight:600,textTransform:"uppercase"},
-  statV:{fontFamily:"'Source Serif 4',Georgia,serif",fontWeight:300,marginTop:2,letterSpacing:"-0.01em"},
-  chartFoot:{fontSize:12,marginTop:6,fontWeight:500},
-  sumGrid:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginTop:6},
-  sumNote:{fontSize:11,color:"#aaa",marginTop:14,lineHeight:1.6},
-  code:{background:"#2a2a2a",padding:"2px 6px",borderRadius:3,color:"#ffd28a",fontSize:10,wordBreak:"break-all"},
-  catGrid:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:10},
-  catBox:{background:"#fafaf7",borderRadius:6,padding:"10px 12px"},
-  catHead:{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,paddingBottom:6,borderBottom:"1px solid #ece7df"},
-  catName:{fontSize:12,fontWeight:700,letterSpacing:"0.04em",textTransform:"uppercase"},
-  catTot:{fontSize:11,color:"#888",fontWeight:600},
-  itemGrid:{display:"flex",flexDirection:"column",gap:5},
-  itemRow:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8},
-  itemL:{fontSize:11,color:"#666",flex:1},
+const st={
+  pg:{minHeight:"100vh",background:"#f6f4f0",fontFamily:"'DM Sans',system-ui,sans-serif",padding:0,maxWidth:960,margin:"0 auto",color:"#1c1c1c"},
+  hero:{textAlign:"center",padding:"16px 16px 14px",background:"#fff",borderBottom:"1px solid #e8e4dd",position:"sticky",top:0,zIndex:30},
+  hL:{fontSize:11,letterSpacing:"0.14em",color:"#aaa",fontWeight:500,marginBottom:2},
+  hN:{fontSize:"clamp(32px,8vw,52px)",fontWeight:300,color:"#1c1c1c",letterSpacing:"-0.02em",lineHeight:1.15,fontFamily:"'Source Serif 4',Georgia,serif",display:"inline-block"},
+  hS:{fontSize:13,color:"#777",marginTop:4},
+  hMeta:{fontSize:12,color:"#999",marginTop:4},
+  note:{fontSize:10,color:"#bbb",marginTop:6,fontStyle:"italic"},
+  syncRow:{display:"inline-flex",alignItems:"center",gap:6,marginTop:8,fontSize:11,color:"#888"},
+  dot:{width:7,height:7,borderRadius:"50%",display:"inline-block"},
+  syncTxt:{},
+  board:{position:"relative",padding:"12px 12px 8px",zIndex:0},
+  svg:{position:"absolute",top:0,left:0,pointerEvents:"none",zIndex:3},
+  rc:{display:"flex",justifyContent:"center",marginBottom:12},
+  eq:{flex:1,background:"#fff",borderRadius:10,padding:"10px 14px 12px"},
+  tag:{fontSize:10,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.1em",color:"#c0b8a8",marginBottom:4},
+  ml:{fontFamily:"'Source Serif 4',Georgia,serif",fontSize:15,display:"flex",flexWrap:"wrap",alignItems:"center",gap:"4px 6px",lineHeight:1.5,color:"#1c1c1c"},
+  pill:{display:"inline-flex",alignItems:"center",padding:"3px 10px",borderRadius:12,border:"1.5px solid",fontSize:12,fontWeight:500,fontFamily:"'DM Sans',sans-serif",fontStyle:"normal",whiteSpace:"nowrap",background:"#fff",position:"relative",zIndex:25,lineHeight:1.3},
+  dv:{fontSize:18,fontStyle:"italic",fontWeight:600,fontFamily:"'Source Serif 4',Georgia,serif",color:"#1c1c1c"},
+  op:{fontStyle:"normal",color:"#bbb",fontSize:13,padding:"0 1px"},
+  rr:{fontSize:12,color:"#b5ad9e",fontFamily:"'DM Sans',sans-serif",marginTop:6,textAlign:"right"},
+  inlineItem:{display:"inline-flex",flexDirection:"column",alignItems:"center",gap:0},
+  gL2:{fontSize:8,color:"#b0a89a",textTransform:"uppercase",letterSpacing:"0.04em",fontWeight:500,lineHeight:1},
+  opNum:{fontSize:13,fontWeight:500,fontFamily:"'Source Serif 4',serif",color:"#888"},
+  eqResult:{fontSize:13,fontWeight:600,fontFamily:"'DM Sans'",color:"#1c1c1c"},
+  subEq:{display:"flex",alignItems:"center",flexWrap:"wrap",gap:"3px 5px",lineHeight:1.5},
+  it2:{fontSize:12,fontStyle:"italic",fontFamily:"'Source Serif 4',serif",color:"#888"},
+  stepper:{display:"inline-flex",flexDirection:"column",alignItems:"center",position:"relative",zIndex:25},
+  sBtn:{padding:"6px 12px",display:"flex",alignItems:"center",justifyContent:"center",minHeight:28,minWidth:36},
+  sVal:{fontSize:13,fontWeight:500,fontFamily:"'DM Sans',sans-serif",color:"#333",background:"#f0ede8",border:"1px solid #e0dbd3",borderRadius:4,padding:"2px 6px",minWidth:40,textAlign:"center",fontStyle:"normal",lineHeight:1.3},
+  frac:{display:"inline-flex",flexDirection:"column",alignItems:"center",verticalAlign:"middle",margin:"0 4px"},
+  fracTop:{display:"flex",alignItems:"center",gap:4,padding:"0 4px",fontSize:13,flexWrap:"wrap",justifyContent:"center"},
+  fracBar:{height:1,background:"#999",width:"100%",margin:"3px 0",alignSelf:"stretch"},
+  fracBot:{display:"flex",alignItems:"center",gap:4,padding:"0 4px",fontSize:13,flexWrap:"wrap",justifyContent:"center"},
+  defBox:{border:"1px dashed #e0dbd3",borderRadius:6,padding:"3px 8px",background:"#fafaf7"},
+  defVal:{fontSize:13,fontWeight:600,color:"#333",fontFamily:"'DM Sans',sans-serif",marginTop:2},
+  sumK:{fontSize:10,color:"#888",letterSpacing:"0.06em",textTransform:"uppercase",fontWeight:500},
+  sumV:{fontSize:18,color:"#fff",fontFamily:"'Source Serif 4',Georgia,serif",fontWeight:300,marginTop:2},
+  scBtn:{flex:"1 1 200px",minWidth:180,maxWidth:240,textAlign:"left",background:"#fafaf7",border:"1px solid #e8e4dd",borderRadius:8,padding:"8px 10px",cursor:"pointer"},
+  scBtnA:{borderColor:"#2a9d8f",background:"#eaf6f3"},
 };
