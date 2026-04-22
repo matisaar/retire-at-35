@@ -222,19 +222,59 @@ export default function App(){
 
   const ok = sim.endBalance >= 0;
 
-  /* Mermaid diagram of the model */
-  const mermaidChart = `flowchart TD
-    A[Current Age ${state.curAge}<br/>Investments ${fmt$M(state.curInv)}] --> B[Grow at ${(state.retNom/10).toFixed(1)}% nominal<br/>+ ${fmt$(state.contribMo)}/mo contrib]
-    B --> C{At Retire Age ${state.retAge}<br/>Portfolio ≈ ${fmt$M(fvCur)}}
-    D[Base spend ${fmt$(state.baseMo)}/mo today] --> E[Inflate ${(state.infl/10).toFixed(1)}%/yr<br/>${yearsTo}yr → ${(inflMultRet).toFixed(2)}× = ${fmt$(state.baseMo*inflMultRet)}/mo at ret]
-    E --> F[Apply life-stage multipliers<br/>35-55: 100% · 55-70: ${state.midMult}% · 70+: ${state.oldMult}%]
-    F --> G[Add kids cost: ${state.kids}× ${fmt$(state.kidExtraMo)}/mo<br/>ages ${state.kidStart}-${state.kidEnd}]
-    C --> H[Year-by-year sim to age ${state.lifeExp}]
-    G --> H
-    H --> I{End balance: ${fmt$M(sim.endBalance)}}
-    I -->|${ok?"✓ funded":"✗ depleted at age "+sim.depleteAge}| J[Required nest egg @ ${state.retAge}: ${fmt$M(reqNest)}]
-    style I fill:${ok?"#e8f4ee":"#fbe8e8"},stroke:${ok?"#3a9e6e":"#c95858"}
-    style J fill:#fff8e6,stroke:#b8892a
+  /* Mermaid: equation backbones — show how every value derives from inputs. */
+  const r = (state.retNom/10).toFixed(1);
+  const i = (state.infl/10).toFixed(1);
+  const baseAnnual = state.baseMo*12;
+  const mermaidChart = `flowchart TB
+    classDef eq fill:#fff,stroke:#1c1c1c,stroke-width:1.5px,color:#1c1c1c
+    classDef inp fill:#fafaf7,stroke:#b5ad9e,stroke-dasharray:3 3,color:#1c1c1c
+    classDef nest fill:#e8f4ee,stroke:#2a9d8f,color:#1c1c1c
+    classDef warn fill:#fff8e6,stroke:#b8892a,color:#1c1c1c
+    classDef out fill:${ok?"#e8f4ee":"#fbe8e8"},stroke:${ok?"#3a9e6e":"#c95858"},color:#1c1c1c
+
+    subgraph IN["INPUTS (today)"]
+      direction LR
+      I1["curAge = ${state.curAge}"]:::inp
+      I2["retAge = ${state.retAge}"]:::inp
+      I3["lifeExp = ${state.lifeExp}"]:::inp
+      I4["curInv = ${fmt$(state.curInv)}"]:::inp
+      I5["C = ${fmt$(state.contribMo)}/mo"]:::inp
+      I6["r = ${r}% /yr<br/>nominal return"]:::inp
+      I7["i = ${i}% /yr<br/>inflation"]:::inp
+      I8["BaseMo = ${fmt$(state.baseMo)}/mo<br/>(today's $)"]:::inp
+    end
+
+    EQI["<b>Inflation factor</b><br/>Infl(t) = (1 + i)^(t − curAge)<br/>at t=retAge: (1+${i}%)^${yearsTo} = ${inflMultRet.toFixed(3)}×"]:::eq
+    EQS["<b>Stage multiplier by age</b><br/>age &lt; 55 → 100%<br/>55 ≤ age &lt; 70 → ${state.midMult}%<br/>age ≥ 70 → ${state.oldMult}%"]:::eq
+    EQK["<b>Kids cost</b><br/>Kids(age) = ${state.kids} × ${fmt$(state.kidExtraMo)}/mo × 12<br/>if ${state.kidStart} ≤ age &lt; ${state.kidEnd}<br/>= ${fmt$(state.kids*state.kidExtraMo*12)}/yr"]:::eq
+
+    EQSPEND["<b>Annual spend at age t</b><br/>Spend(t) = BaseMo × 12 × Infl(t) × Stage(age) + Kids(age)<br/>= ${fmt$(baseAnnual)} × Infl(t) × Stage + Kids<br/>at retAge: ≈ ${fmt$(baseAnnual*inflMultRet)}/yr"]:::eq
+
+    EQACC["<b>Accumulation (curAge → retAge)</b><br/>P(t+1) = P(t) × (1+r) + 12·C<br/>P(curAge) = curInv = ${fmt$(state.curInv)}<br/>→ P(retAge) ≈ ${fmt$(fvCur)}"]:::eq
+    EQRET["<b>Drawdown (retAge → lifeExp)</b><br/>P(t+1) = (P(t) − Spend(t)) × (1+r)<br/>r = ${r}%, run ${state.lifeExp-state.retAge} years"]:::eq
+
+    OUT["<b>End balance @ age ${state.lifeExp}</b><br/>P(${state.lifeExp}) = ${fmt$M(sim.endBalance)}<br/>${ok?"✓ funded":"✗ depletes at age "+sim.depleteAge}"]:::out
+
+    SOLVE_N["<b>Required nest egg N*</b><br/>solve P(retAge)=N*, C=0 → P(lifeExp)=0<br/>(binary search)<br/>N* = ${fmt$M(reqNest)}"]:::nest
+    SOLVE_C["<b>Required contribution C*</b><br/>solve given C → P(lifeExp)=0<br/>(binary search)<br/>C* = ${fmt$(reqContrib)}/mo"]:::warn
+
+    I7 --> EQI
+    I1 --> EQI
+    I2 --> EQI
+    I8 --> EQSPEND
+    EQI --> EQSPEND
+    EQS --> EQSPEND
+    EQK --> EQSPEND
+    I4 --> EQACC
+    I5 --> EQACC
+    I6 --> EQACC
+    EQACC --> EQRET
+    EQSPEND --> EQRET
+    I6 --> EQRET
+    EQRET --> OUT
+    OUT -.gap.-> SOLVE_N
+    OUT -.gap.-> SOLVE_C
   `;
 
   return (
