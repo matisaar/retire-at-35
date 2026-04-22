@@ -81,14 +81,14 @@ const PRESETS = {
     note: "Same as baseline but inflation 3.5%. Advisor: bumps to ~7M.",
     state: { curAge:35, retAge:35, lifeExp:90, curInv:7000000, contribMo:0, retNom:65, infl:35, exp:scaledExp(15000), kids:0, kidExtraMo:0, kidStart:35, kidEnd:53, midMult:100, oldMult:100, badSeq:false },
   },
-  "matt-current": {
-    label: "Matt's current plan",
+  "mati-current": {
+    label: "Mati's current plan",
     note: "Working from current age toward 35. Solve for monthly contribution.",
     state: { curAge:28, retAge:35, lifeExp:90, curInv:75000, contribMo:8000, retNom:65, infl:30, exp:defaultExp(), kids:2, kidExtraMo:1500, kidStart:35, kidEnd:53, midMult:100, oldMult:80, badSeq:false },
   },
 };
 
-const DEFAULT_STATE = PRESETS["matt-current"].state;
+const DEFAULT_STATE = PRESETS["mati-current"].state;
 
 /* ─────────────  Helpers  ───────────── */
 const fmt$ = v => (v<0?"−$":"$") + Math.round(Math.abs(v)).toLocaleString();
@@ -203,14 +203,14 @@ function Stat({ label, value, color, big }){
 
 /* ─────────────  App  ───────────── */
 export default function App(){
-  // plan id from URL hash (e.g. #plan=advisor-matt). Default: shared room.
+  // plan id from URL hash (e.g. #plan=advisor-mati). Default: shared room.
   const planId = useMemo(()=>{
     const m = window.location.hash.match(/plan=([\w-]+)/);
-    return m ? m[1] : "advisor-matt";
+    return m ? m[1] : "advisor-mati";
   },[]);
   const [state, setState] = useState(DEFAULT_STATE);
   const [sync, setSync] = useState({ live:false, last:null });
-  const [scenario, setScenario] = useState("matt-current");
+  const [scenario, setScenario] = useState("mati-current");
   const skipSave = useRef(true);
 
   /* Load + subscribe */
