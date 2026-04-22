@@ -114,6 +114,17 @@ function Stepper({ value, onChange, step=100, min=0, max=99999999, pre="$", suf=
   );
 }
 
+/** Percent stepper. Stores value as per-mille int (so 65 = 6.5%) but displays as a normal percent. */
+function PctStepper({ value, onChange, step=1, min=0, max=300 }){
+  return (
+    <span style={S.stepper}>
+      <button style={S.sBtn} onClick={()=>onChange(Math.min(max,value+step))} aria-label="up">▲</button>
+      <span style={S.sVal}>{(value/10).toFixed(1)}%</span>
+      <button style={S.sBtn} onClick={()=>onChange(Math.max(min,value-step))} aria-label="down">▼</button>
+    </span>
+  );
+}
+
 function Field({ label, hint, children }){
   return (
     <div style={S.field}>
@@ -282,8 +293,8 @@ export default function App(){
           <Field label="Life expectancy"><Stepper value={state.lifeExp} onChange={v=>set("lifeExp",v)} step={1} min={state.retAge} max={120} pre="" suf=" yr"/></Field>
           <Field label="Investments today"><Stepper value={state.curInv} onChange={v=>set("curInv",v)} step={5000}/></Field>
           <Field label="Monthly contribution (now → retire)" hint={`Solver says: ${fmt$(reqContrib)}/mo to fully fund`}><Stepper value={state.contribMo} onChange={v=>set("contribMo",v)} step={250}/></Field>
-          <Field label="Nominal return /yr" hint="Per-mille (65 = 6.5%)"><Stepper value={state.retNom} onChange={v=>set("retNom",v)} step={5} min={0} max={300} pre="" suf="‰"/></Field>
-          <Field label="Inflation /yr" hint="Per-mille (30 = 3.0%)"><Stepper value={state.infl} onChange={v=>set("infl",v)} step={5} min={0} max={200} pre="" suf="‰"/></Field>
+          <Field label="Nominal return /yr" hint="Steps in 0.1%"><PctStepper value={state.retNom} onChange={v=>set("retNom",v)} step={1} min={0} max={300}/></Field>
+          <Field label="Inflation /yr" hint="Steps in 0.1%"><PctStepper value={state.infl} onChange={v=>set("infl",v)} step={1} min={0} max={200}/></Field>
           <Field label="Base spend (today's $/mo)" hint={`At retire age ≈ ${fmt$(state.baseMo*inflMultRet)}/mo nominal`}><Stepper value={state.baseMo} onChange={v=>set("baseMo",v)} step={250}/></Field>
         </div>
       </div>
