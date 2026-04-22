@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { supabase, isSupabase } from "./supabase.js";
+import BugReportButton from "./BugReportButton.jsx";
 
 /* ── Shared colors ── */
 const C_NEST="#2a9d8f", C_FV="#6a8ab5", C_RATE="#b8892a", C_MONTHS="#8b5fb0", C_YEARS="#7a8e5a";
@@ -350,6 +351,7 @@ export default function App(){
           </div>
         </div></div>
       </div>
+      <BugReportButton planId={planId} planState={s}/>
       <div style={{height:32}}/>
     </div>
   );
