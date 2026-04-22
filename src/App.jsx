@@ -1,60 +1,14 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { supabase, isSupabase } from "./supabase.js";
 import BugReportButton from "./BugReportButton.jsx";
+import { CATS, ALL_ITEMS, defaultExp, sumCat, derive, CONNECTIONS } from "./calc.js";
 
 /* ── Shared colors ── */
 const C_NEST="#2a9d8f", C_FV="#6a8ab5", C_RATE="#b8892a", C_MONTHS="#8b5fb0", C_YEARS="#7a8e5a";
 const C_EXP="#c47a3a", C_SWR="#7a6a8a", C_INV="#457bb5", C_AGE="#c95858", C_RETAGE="#3a9e6e";
 const C_MO="#c47a3a", C_KIDS="#b07a8a";
 
-/* ── Itemized retirement budget (today's $/mo) ── */
-const CATS = [
-  {key:"Housing",color:"#2a9d8f",items:[
-    {k:"rent",l:"rent / mortgage",s:100,d:2400},{k:"prop",l:"property tax",s:25,d:0},
-    {k:"hIns",l:"home insurance",s:10,d:50},{k:"hydr",l:"hydro",s:25,d:90},
-    {k:"gas_",l:"gas / heat",s:10,d:50},{k:"watr",l:"water",s:10,d:0},
-    {k:"inet",l:"internet",s:10,d:80},{k:"maint",l:"home maintenance",s:25,d:100}]},
-  {key:"Food",color:"#457bb5",items:[
-    {k:"groc",l:"groceries",s:50,d:900},{k:"dine",l:"dining out",s:25,d:300},
-    {k:"deli",l:"takeout",s:25,d:120},{k:"coff",l:"coffee",s:10,d:80},
-    {k:"alc_",l:"alcohol / wine",s:10,d:100}]},
-  {key:"Transport",color:"#8b5fb0",items:[
-    {k:"carP",l:"car payment",s:50,d:0},{k:"chrg",l:"fuel / charging",s:10,d:120},
-    {k:"cIns",l:"auto insurance",s:25,d:200},{k:"mnt_",l:"car maintenance",s:25,d:100},
-    {k:"reg_",l:"plates / reg",s:5,d:15},{k:"park",l:"parking",s:25,d:50}]},
-  {key:"Healthcare",color:"#c95858",items:[
-    {k:"hcIns",l:"private insurance",s:25,d:300},{k:"dent",l:"dental",s:10,d:80},
-    {k:"vis_",l:"vision",s:10,d:30},{k:"rx__",l:"prescriptions",s:10,d:50},
-    {k:"supp",l:"supplements",s:10,d:60},{k:"ther",l:"therapy / wellness",s:25,d:100}]},
-  {key:"Personal",color:"#3a9e6e",items:[
-    {k:"hair",l:"haircuts",s:10,d:80},{k:"skin",l:"skincare",s:10,d:50},
-    {k:"gym_",l:"gym / fitness",s:10,d:120}]},
-  {key:"Clothing",color:"#6a8ab5",items:[
-    {k:"clth",l:"clothes",s:25,d:150},{k:"shoe",l:"shoes",s:25,d:50}]},
-  {key:"Travel",color:"#d4845a",items:[
-    {k:"trip",l:"big trips",s:100,d:800},{k:"week",l:"weekends away",s:25,d:200},
-    {k:"flgt",l:"flights",s:50,d:300},{k:"vIns",l:"travel insurance",s:10,d:30}]},
-  {key:"Entertain",color:"#9a7ab0",items:[
-    {k:"entr",l:"events / shows",s:25,d:150},{k:"hobb",l:"hobbies",s:25,d:200},
-    {k:"dOut",l:"dates / social",s:25,d:150}]},
-  {key:"Pet",color:"#b07a8a",items:[
-    {k:"pFoo",l:"pet food",s:10,d:80},{k:"vet_",l:"vet",s:25,d:75},
-    {k:"grmg",l:"grooming",s:10,d:60},{k:"pIns",l:"pet insurance",s:10,d:50}]},
-  {key:"Bills & Subs",color:"#5b9ec9",items:[
-    {k:"phon",l:"phone",s:10,d:100},{k:"strm",l:"streaming",s:5,d:60},
-    {k:"apps",l:"apps / subs",s:5,d:40},{k:"clud",l:"cloud / software",s:5,d:30}]},
-  {key:"Insurance",color:"#8a7a5a",items:[
-    {k:"lIns",l:"life insurance",s:10,d:50},{k:"uIns",l:"umbrella insurance",s:10,d:30}]},
-  {key:"Gifts & Giving",color:"#7a6a8a",items:[
-    {k:"bday",l:"birthdays",s:10,d:60},{k:"holi",l:"holidays",s:25,d:120},
-    {k:"char",l:"donations",s:25,d:50}]},
-  {key:"Buffer",color:"#7a8a7a",items:[
-    {k:"misc",l:"misc / unplanned",s:50,d:400}]},
-];
-const ALL_ITEMS = CATS.flatMap(c => c.items);
-const defaultExp = () => { const o={}; ALL_ITEMS.forEach(i=>o[i.k]=i.d); return o; };
-const sumExp = (exp) => ALL_ITEMS.reduce((a,it)=>a + (Number(exp?.[it.k] ?? it.d) || 0), 0);
-const sumCat = (cat, exp) => cat.items.reduce((a,it)=>a + (Number(exp?.[it.k] ?? it.d) || 0), 0);
+/* ── Itemized retirement budget categories live in calc.js (single source of truth, importable by tests) ── */
 
 /* ── Scenarios (override real-return + SWR + kids) ── */
 const SCENARIOS = [
@@ -147,40 +101,9 @@ export default function App(){
     setS(p => ({ ...p, realRet:sc.realRet, swrPct:sc.swrPct, kids:sc.kids, kidExtraMo:sc.kidExtraMo }));
   };
 
-  /* ── Derived math (today's $, REAL return — won't go negative, no inflation drift) ── */
-  const Y  = Math.max(0.0001, s.retAge - s.curAge);     // years till retirement
-  const n  = Math.round(Y*12);                          // months
-  const r  = s.realRet/100;                             // real return decimal
-  const swr = s.swrPct/100;                             // safe withdrawal rate
-  const rm = Math.pow(1+r, 1/12) - 1;                   // monthly real rate
-  const baseMo = sumExp(s.exp);                         // itemized monthly spend
-  const kidsMo = s.kids * s.kidExtraMo;                 // kids extra
-  const spendMo = baseMo + kidsMo;                      // total monthly retirement spend
-  const E  = spendMo*12;                                // annual retirement expenses (today's $)
-  const N  = swr > 0 ? E/swr : 0;                       // target nest egg (today's $)
-  const FVcur = s.curInv * Math.pow(1+r, Y);            // future value of current inv (today's $)
-  const Need = Math.max(0, N - FVcur);                  // gap to fund via contributions
-  const M = (rm > 0 && n > 0) ? (Need*rm)/(Math.pow(1+rm,n) - 1) : (n > 0 ? Need/n : 0);
-  const Total = M*n;
-  const onTrack = FVcur >= N && N > 0;
-
-  /* ── Connections (from-pill → to-pill) ── */
-  const conns = [
-    {from:"hero-M",  to:"eq1-M",   color:C_RATE},
-    {from:"eq1-N",   to:"eq2-N",   color:C_NEST},
-    {from:"eq1-FV",  to:"eq3-FV",  color:C_FV},
-    {from:"eq1-rm",  to:"eq6-rm",  color:C_RATE},
-    {from:"eq1-n",   to:"eq5-n",   color:C_MONTHS},
-    {from:"eq2-E",   to:"eq4-E",   color:C_EXP},
-    {from:"eq2-SWR", to:"def-SWR", color:C_SWR},
-    {from:"eq3-Inv", to:"def-Inv", color:C_INV},
-    {from:"eq3-r",   to:"def-r",   color:C_RATE},
-    {from:"eq3-Y",   to:"eq5-Y",   color:C_YEARS},
-    {from:"eq4-Mo",  to:"def-Mo",  color:C_MO},
-    {from:"eq6-r",   to:"def-r",   color:C_RATE},
-    {from:"eq5-RA",  to:"def-RA",  color:C_RETAGE},
-    {from:"eq5-CA",  to:"def-CA",  color:C_AGE},
-  ];
+  /* ── Derived math + connection map: all in calc.js so tests can pin them down ── */
+  const { Y, n, rm, swr, baseMo, kidsMo, spendMo, E, N, FVcur, Need, M, Total, onTrack } = derive(s);
+  const conns = CONNECTIONS;
 
   const cRef = useRef(null), svgRef = useRef(null);
   useEffect(()=>{
@@ -198,10 +121,10 @@ export default function App(){
         const path = document.createElementNS("http://www.w3.org/2000/svg","path");
         path.setAttribute("d", "M"+x1+","+y1+" C"+x1+","+(y1+cp)+" "+x2+","+(y2-cp)+" "+x2+","+y2);
         path.setAttribute("stroke", conn.color); path.setAttribute("stroke-width","1.5");
-        path.setAttribute("fill","none"); path.setAttribute("opacity","0.38"); svg.appendChild(path);
+        path.setAttribute("fill","none"); path.setAttribute("opacity","0.45"); svg.appendChild(path);
         const sz = 4.5; const tri = document.createElementNS("http://www.w3.org/2000/svg","polygon");
         tri.setAttribute("points", x2+","+y2+" "+(x2-sz)+","+(y2-sz*1.7)+" "+(x2+sz)+","+(y2-sz*1.7));
-        tri.setAttribute("fill", conn.color); tri.setAttribute("opacity","0.45"); svg.appendChild(tri);
+        tri.setAttribute("fill", conn.color); tri.setAttribute("opacity","0.55"); svg.appendChild(tri);
       });
     };
     const raf = () => requestAnimationFrame(draw);
@@ -266,7 +189,7 @@ export default function App(){
               <div style={st.tag}>Monthly cost breakdown (today's $)</div>
               <div style={{fontSize:11,color:"#888",marginTop:2}}>What you'll spend per month at age {s.retAge}. Adjust each line. Kids cost is added separately below.</div>
             </div>
-            <div style={{textAlign:"right"}}>
+            <div data-var="breakdown-base" style={{textAlign:"right",border:"1.5px solid "+C_MO,borderRadius:8,padding:"4px 10px",background:"#fff7f0"}}>
               <div style={{fontSize:10,color:"#aaa",letterSpacing:".06em",textTransform:"uppercase"}}>Itemized base</div>
               <div style={{fontSize:22,fontFamily:"'Source Serif 4',serif",fontWeight:400,color:"#1c1c1c"}}>{fmt(baseMo)}<span style={{fontSize:12,color:"#888"}}>/mo</span></div>
               {kidsMo>0 && <div style={{fontSize:11,color:C_KIDS,marginTop:2}}>+ {fmt(kidsMo)} kids = <b style={{color:"#1c1c1c"}}>{fmt(spendMo)}/mo</b></div>}
@@ -304,7 +227,7 @@ export default function App(){
               );
             })}
           </div>
-          <div style={{marginTop:12,padding:"10px 12px",background:"#fff7f0",border:`1px dashed ${C_KIDS}`,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+          <div data-var="breakdown-kids" style={{marginTop:12,padding:"10px 12px",background:"#fff7f0",border:`1px dashed ${C_KIDS}`,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
             <div style={{fontSize:12,color:"#1c1c1c"}}>
               <b style={{color:C_KIDS}}>Kids:</b> {s.kids} × {fmt(s.kidExtraMo)}/mo = <b>{fmt(kidsMo)}/mo</b>
               <span style={{color:"#888",marginLeft:6,fontSize:11}}>(adjust below in inputs)</span>
