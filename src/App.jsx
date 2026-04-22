@@ -9,10 +9,10 @@ const C_MO="#c47a3a";
 
 /* ── Scenarios (override real-return + SWR + monthly spend) ── */
 const SCENARIOS = [
-  { key:"baseline", label:"Baseline (advisor 6.5%/3%)", realRet:35, swrPct:36, spendMo:15000, note:"6.5% nominal − 3% inflation = 3.5% real, 3.6% SWR." },
-  { key:"kids",     label:"With 2 kids",                 realRet:35, swrPct:36, spendMo:17000, note:"Same returns, +$2K/mo to cover kids while alive." },
-  { key:"lowret",   label:"Returns are 4%",              realRet:10, swrPct:30, spendMo:15000, note:"4% nominal − 3% infl = 1% real, 3% SWR. Brutal." },
-  { key:"highinfl", label:"Inflation +0.5%",             realRet:30, swrPct:35, spendMo:15000, note:"6.5% − 3.5% = 3% real, 3.5% SWR." },
+  { key:"baseline", label:"Baseline (advisor 6.5%/3%)", realRet:3.5, swrPct:3.6, spendMo:15000, note:"6.5% nominal − 3% inflation = 3.5% real, 3.6% SWR." },
+  { key:"kids",     label:"With 2 kids",                 realRet:3.5, swrPct:3.6, spendMo:17000, note:"Same returns, +$2K/mo to cover kids while alive." },
+  { key:"lowret",   label:"Returns are 4%",              realRet:1.0, swrPct:3.0, spendMo:15000, note:"4% nominal − 3% infl = 1% real, 3% SWR. Brutal." },
+  { key:"highinfl", label:"Inflation +0.5%",             realRet:3.0, swrPct:3.5, spendMo:15000, note:"6.5% − 3.5% = 3% real, 3.5% SWR." },
 ];
 
 /* ── Helpers ── */
@@ -23,20 +23,28 @@ const fmtM=v=>(v<0?"−$":"$")+(Math.abs(v)/1e6).toFixed(2)+"M";
 function Pill({name,id,color}){
   return <span data-var={id} style={{...st.pill,borderColor:color,color}}>{name}</span>;
 }
-function Num({value,onChange,step=50,min=0,max=99999999,pre="$",suf=""}){
-  return(<span style={st.stepper}>
-    <button style={st.sBtn} onClick={()=>onChange(Math.min(max,value+step))}>
-      <svg width="10" height="4" viewBox="0 0 10 4"><path d="M1.5 3.5L5 .5L8.5 3.5" stroke="#b5ad9e" strokeWidth="1.3" fill="none" strokeLinecap="round"/></svg>
-    </button>
-    <span style={st.sVal}>{pre}{value.toLocaleString()}{suf}</span>
-    <button style={st.sBtn} onClick={()=>onChange(Math.max(min,value-step))}>
-      <svg width="10" height="4" viewBox="0 0 10 4"><path d="M1.5.5L5 3.5L8.5.5" stroke="#b5ad9e" strokeWidth="1.3" fill="none" strokeLinecap="round"/></svg>
-    </button>
-  </span>);
+function Num({value,onChange,step=50,min=0,max=99999999,pre="$",suf="",label,color,id,decimals=0,fmtFn}){
+  const display = fmtFn ? fmtFn(value) : (pre + (decimals ? value.toFixed(decimals) : Math.round(value).toLocaleString()) + suf);
+  const inc = () => onChange(Math.min(max, +(value+step).toFixed(4)));
+  const dec = () => onChange(Math.max(min, +(value-step).toFixed(4)));
+  return(
+    <span data-var={id} style={{...st.stepper, ...(color ? {border:`1.5px solid ${color}`, borderRadius:8, padding:"3px 8px 4px", background:"#fff"} : {})}}>
+      {label && <span style={{...st.gL2, ...(color?{color}:{})}}>{label}</span>}
+      <span style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:label?2:0}}>
+        <button style={st.sBtn} onClick={dec} aria-label="decrease">
+          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5h6" stroke="#888" strokeWidth="1.5" strokeLinecap="round"/></svg>
+        </button>
+        <span style={{...st.sVal, ...(color?{color:"#1c1c1c",fontWeight:600,background:"transparent",border:"none",padding:0,minWidth:0}:{})}}>{display}</span>
+        <button style={st.sBtn} onClick={inc} aria-label="increase">
+          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 2v6M2 5h6" stroke="#888" strokeWidth="1.5" strokeLinecap="round"/></svg>
+        </button>
+      </span>
+    </span>
+  );
 }
 const Op=({c})=><span style={st.op}>{c}</span>;
 
-const DEFAULT_STATE = { curAge:28, retAge:35, curInv:75000, realRet:35, swrPct:36, spendMo:8000 };
+const DEFAULT_STATE = { curAge:28, retAge:35, curInv:75000, realRet:3.5, swrPct:3.6, spendMo:8000 };
 
 export default function App(){
   /* Plan id from hash */
@@ -92,8 +100,8 @@ export default function App(){
   /* ── Derived math (today's $, REAL return — won't go negative, no inflation drift) ── */
   const Y  = Math.max(0.0001, s.retAge - s.curAge);     // years till retirement
   const n  = Math.round(Y*12);                          // months
-  const r  = s.realRet/1000;                            // real return decimal (35 → 3.5%)
-  const swr = s.swrPct/1000;                            // safe withdrawal rate (36 → 3.6%)
+  const r  = s.realRet/100;                             // real return decimal (3.5 → 0.035)
+  const swr = s.swrPct/100;                             // safe withdrawal rate (3.6 → 0.036)
   const rm = Math.pow(1+r, 1/12) - 1;                   // monthly real rate
   const E  = s.spendMo*12;                              // annual retirement expenses (today's $)
   const N  = swr > 0 ? E/swr : 0;                       // target nest egg (today's $)
@@ -184,7 +192,7 @@ export default function App(){
           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
             {SCENARIOS.map(sc => {
               const active = s.realRet===sc.realRet && s.swrPct===sc.swrPct && s.spendMo===sc.spendMo;
-              const nest = (sc.spendMo*12)/(sc.swrPct/1000);
+              const nest = (sc.spendMo*12)/(sc.swrPct/100);
               return (
                 <button key={sc.key} onClick={()=>applyScenario(sc)} style={{...st.scBtn, ...(active?st.scBtnA:{})}}>
                   <div style={{fontSize:12,fontWeight:600}}>{sc.label}</div>
@@ -223,7 +231,7 @@ export default function App(){
               <span style={st.fracBot}><Pill name="SWR" id="eq2-SWR" color={C_SWR}/></span>
             </span>
           </div>
-          <div style={st.rr}>= {fmtM(N)} &nbsp;·&nbsp; ≈ {(s.swrPct/10).toFixed(1)}% withdrawal × {fmtM(N)} = {fmt(N*swr)}/yr</div>
+          <div style={st.rr}>= {fmtM(N)} &nbsp;·&nbsp; ≈ {s.swrPct.toFixed(1)}% withdrawal × {fmtM(N)} = {fmt(N*swr)}/yr</div>
         </div></div>
 
         {/* Equation 3: FV of current investments */}
@@ -236,7 +244,7 @@ export default function App(){
               <Pill name="Years" id="eq3-Y" color={C_YEARS}/>
             </sup>
           </div>
-          <div style={st.rr}>= {fmt(s.curInv)} × (1+{(s.realRet/10).toFixed(1)}%)^{Y.toFixed(1)} = {fmtM(FVcur)}</div>
+          <div style={st.rr}>= {fmt(s.curInv)} × (1+{s.realRet.toFixed(1)}%)^{Y.toFixed(1)} = {fmtM(FVcur)}</div>
         </div></div>
 
         {/* Equation 4: Annual Expenses (single $/mo) */}
@@ -265,58 +273,16 @@ export default function App(){
               <span style={st.eqResult}>= {n} mo</span>
             </span>
           </div>
-          <div style={{...st.subEq,marginTop:10,gap:"8px 14px",flexWrap:"wrap"}}>
-            <span style={st.inlineItem}>
-              <span style={st.gL2}>current age</span>
-              <Num value={s.curAge} onChange={v=>set("curAge",v)} step={1} min={1} max={s.retAge-1} pre="" suf=" yr"/>
-            </span>
-            <span data-var="def-CA" style={{...st.inlineItem,...st.defBox,borderColor:C_AGE}}>
-              <span style={{...st.gL2,color:C_AGE}}>Current Age</span>
-              <span style={st.defVal}>{s.curAge} yr</span>
-            </span>
-            <span style={st.inlineItem}>
-              <span style={st.gL2}>retire age</span>
-              <Num value={s.retAge} onChange={v=>set("retAge",v)} step={1} min={s.curAge+1} max={80} pre="" suf=" yr"/>
-            </span>
-            <span data-var="def-RA" style={{...st.inlineItem,...st.defBox,borderColor:C_RETAGE}}>
-              <span style={{...st.gL2,color:C_RETAGE}}>Retire Age</span>
-              <span style={st.defVal}>{s.retAge} yr</span>
-            </span>
-            <span style={st.inlineItem}>
-              <span style={st.gL2}>investments today</span>
-              <Num value={s.curInv} onChange={v=>set("curInv",v)} step={5000} pre="$"/>
-            </span>
-            <span data-var="def-Inv" style={{...st.inlineItem,...st.defBox,borderColor:C_INV}}>
-              <span style={{...st.gL2,color:C_INV}}>Investments</span>
-              <span style={st.defVal}>{fmt(s.curInv)}</span>
-            </span>
-            <span style={st.inlineItem}>
-              <span style={st.gL2}>monthly spend</span>
-              <Num value={s.spendMo} onChange={v=>set("spendMo",v)} step={250} pre="$"/>
-            </span>
-            <span data-var="def-Mo" style={{...st.inlineItem,...st.defBox,borderColor:C_MO}}>
-              <span style={{...st.gL2,color:C_MO}}>Monthly Spend</span>
-              <span style={st.defVal}>{fmt(s.spendMo)}</span>
-            </span>
-            <span style={st.inlineItem}>
-              <span style={st.gL2}>real return /yr</span>
-              <Num value={s.realRet} onChange={v=>set("realRet",v)} step={5} min={0} max={200} pre="" suf="‰"/>
-            </span>
-            <span data-var="def-r" style={{...st.inlineItem,...st.defBox,borderColor:C_RATE}}>
-              <span style={{...st.gL2,color:C_RATE}}>r (real)</span>
-              <span style={st.defVal}>{(s.realRet/10).toFixed(1)}% /yr</span>
-            </span>
-            <span style={st.inlineItem}>
-              <span style={st.gL2}>safe withdrawal</span>
-              <Num value={s.swrPct} onChange={v=>set("swrPct",v)} step={1} min={10} max={100} pre="" suf="‰"/>
-            </span>
-            <span data-var="def-SWR" style={{...st.inlineItem,...st.defBox,borderColor:C_SWR}}>
-              <span style={{...st.gL2,color:C_SWR}}>SWR</span>
-              <span style={st.defVal}>{(s.swrPct/10).toFixed(1)}%</span>
-            </span>
+          <div style={{...st.subEq,marginTop:10,gap:"10px 14px",flexWrap:"wrap"}}>
+            <Num id="def-CA"  label="Current Age"     color={C_AGE}    value={s.curAge}  onChange={v=>set("curAge",v)}  step={1}    min={1}             max={s.retAge-1} pre="" suf=" yr"/>
+            <Num id="def-RA"  label="Retire Age"      color={C_RETAGE} value={s.retAge}  onChange={v=>set("retAge",v)}  step={1}    min={s.curAge+1}    max={80}         pre="" suf=" yr"/>
+            <Num id="def-Inv" label="Investments"     color={C_INV}    value={s.curInv}  onChange={v=>set("curInv",v)}  step={5000} min={0}                              pre="$"/>
+            <Num id="def-Mo"  label="Monthly Spend"   color={C_MO}     value={s.spendMo} onChange={v=>set("spendMo",v)} step={250}  min={0}                              pre="$"/>
+            <Num id="def-r"   label="r (real) /yr"    color={C_RATE}   value={s.realRet} onChange={v=>set("realRet",v)} step={0.1}  min={0}             max={20}         decimals={1} pre="" suf="%"/>
+            <Num id="def-SWR" label="SWR"             color={C_SWR}    value={s.swrPct}  onChange={v=>set("swrPct",v)}  step={0.1}  min={1}             max={10}         decimals={1} pre="" suf="%"/>
           </div>
           <div style={{fontSize:10,color:"#aaa",marginTop:8,fontStyle:"italic"}}>
-            ‰ stepper is per-mille (35 = 3.5% real return). Real return = nominal − inflation. SWR 4% is the Trinity Study rule of thumb, advisor uses ~3.6% for 55-year horizon.
+            Real return = nominal − inflation. SWR 4% is the Trinity Study rule of thumb, advisor uses ~3.6% for the 55-year horizon. Click any pill above to highlight what flows into it.
           </div>
         </div></div>
 
@@ -342,8 +308,8 @@ export default function App(){
             <div><div style={st.sumK}>Funding gap</div><div style={st.sumV}>{fmtM(Need)}</div></div>
             <div><div style={st.sumK}>Monthly contribution</div><div style={{...st.sumV,color:"#ffd28a"}}>{fmt(M)}</div></div>
             <div><div style={st.sumK}>Total contributed</div><div style={st.sumV}>{fmtM(Total)}</div></div>
-            <div><div style={st.sumK}>Real return assumption</div><div style={st.sumV}>{(s.realRet/10).toFixed(1)}% /yr</div></div>
-            <div><div style={st.sumK}>SWR assumption</div><div style={st.sumV}>{(s.swrPct/10).toFixed(1)}%</div></div>
+            <div><div style={st.sumK}>Real return assumption</div><div style={st.sumV}>{s.realRet.toFixed(1)}% /yr</div></div>
+            <div><div style={st.sumK}>SWR assumption</div><div style={st.sumV}>{s.swrPct.toFixed(1)}%</div></div>
           </div>
           <div style={{fontSize:10,color:"#888",marginTop:14,lineHeight:1.6}}>
             Share with advisor: <code style={{background:"#2a2a2a",padding:"2px 6px",borderRadius:3,color:"#ffd28a"}}>{window.location.origin + window.location.pathname + "#plan=" + planId}</code><br/>
