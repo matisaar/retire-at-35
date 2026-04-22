@@ -3,32 +3,88 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceL
 import Mermaid from "./Mermaid.jsx";
 import { supabase, isSupabase } from "./supabase.js";
 
+/* ─────────────  Retirement budget categories (today's $/mo)  ───────────── */
+const CATS = [
+  {key:"Housing",color:"#2a9d8f",items:[
+    {k:"rent",l:"rent/mortgage",s:100,d:2400},{k:"prop",l:"property tax",s:25,d:0},
+    {k:"hIns",l:"home ins",s:10,d:50},{k:"hydr",l:"hydro",s:25,d:90},
+    {k:"gas_",l:"gas/heat",s:10,d:50},{k:"watr",l:"water",s:10,d:0},
+    {k:"inet",l:"internet",s:10,d:80},{k:"maint",l:"home maint",s:25,d:100}]},
+  {key:"Food",color:"#457bb5",items:[
+    {k:"groc",l:"groceries",s:50,d:700},{k:"dine",l:"dining out",s:25,d:250},
+    {k:"deli",l:"takeout",s:25,d:100},{k:"coff",l:"coffee",s:10,d:60},
+    {k:"alc_",l:"alcohol/wine",s:10,d:80}]},
+  {key:"Transport",color:"#8b5fb0",items:[
+    {k:"carP",l:"car pmt",s:50,d:0},{k:"chrg",l:"fuel/charging",s:10,d:80},
+    {k:"cIns",l:"auto ins",s:25,d:200},{k:"mnt_",l:"car maint",s:25,d:80},
+    {k:"reg_",l:"plates/reg",s:5,d:15},{k:"park",l:"parking",s:25,d:50}]},
+  {key:"Healthcare",color:"#c95858",items:[
+    {k:"hcIns",l:"private ins",s:25,d:300},{k:"dent",l:"dental",s:10,d:80},
+    {k:"vis_",l:"vision",s:10,d:30},{k:"rx__",l:"prescriptions",s:10,d:50},
+    {k:"supp",l:"supplements",s:10,d:60},{k:"ther",l:"therapy/wellness",s:25,d:100}]},
+  {key:"Personal",color:"#3a9e6e",items:[
+    {k:"hair",l:"haircuts",s:10,d:80},{k:"skin",l:"skincare",s:10,d:50},
+    {k:"gym_",l:"gym/fitness",s:10,d:100}]},
+  {key:"Clothing",color:"#6a8ab5",items:[
+    {k:"clth",l:"clothes",s:25,d:80},{k:"shoe",l:"shoes",s:25,d:30}]},
+  {key:"Travel",color:"#d4845a",items:[
+    {k:"trip",l:"big trips",s:100,d:600},{k:"week",l:"weekends",s:25,d:200},
+    {k:"flgt",l:"flights",s:50,d:200},{k:"vIns",l:"travel ins",s:10,d:30}]},
+  {key:"Entertain",color:"#9a7ab0",items:[
+    {k:"entr",l:"events/shows",s:25,d:120},{k:"hobb",l:"hobbies",s:25,d:150},
+    {k:"dOut",l:"dates/social",s:25,d:100}]},
+  {key:"Pet",color:"#b07a8a",items:[
+    {k:"pFoo",l:"food/treats",s:10,d:75},{k:"vet_",l:"vet",s:25,d:75},
+    {k:"grmg",l:"grooming",s:10,d:60},{k:"pIns",l:"pet ins",s:10,d:50}]},
+  {key:"Bills",color:"#5b9ec9",items:[
+    {k:"phon",l:"phone",s:10,d:80},{k:"strm",l:"streaming",s:5,d:50},
+    {k:"apps",l:"apps/subs",s:5,d:30},{k:"clud",l:"cloud/software",s:5,d:20}]},
+  {key:"Insurance",color:"#8a7a5a",items:[
+    {k:"lIns",l:"life ins",s:10,d:50},{k:"uIns",l:"umbrella ins",s:10,d:30}]},
+  {key:"Gifts",color:"#7a6a8a",items:[
+    {k:"bday",l:"birthdays",s:10,d:50},{k:"holi",l:"holidays",s:25,d:100},
+    {k:"char",l:"donations",s:25,d:50}]},
+  {key:"Buffer",color:"#7a8a7a",items:[
+    {k:"misc",l:"misc/unplanned",s:50,d:300}]},
+];
+const ALL_ITEMS = CATS.flatMap(c => c.items);
+const defaultExp = () => { const o={}; ALL_ITEMS.forEach(i=>o[i.k]=i.d); return o; };
+const DEFAULT_EXP_SUM = ALL_ITEMS.reduce((a,i)=>a+i.d, 0);
+/** Build an exp object scaled so the monthly total ≈ targetMo. Rounds each item to nearest $25. */
+function scaledExp(targetMo){
+  const k = targetMo / DEFAULT_EXP_SUM;
+  const o = {};
+  ALL_ITEMS.forEach(it => { o[it.k] = it.d === 0 ? 0 : Math.max(0, Math.round(it.d * k / 25) * 25); });
+  return o;
+}
+const sumExp = (exp) => ALL_ITEMS.reduce((a,it)=>a + (exp?.[it.k] ?? it.d), 0);
+
 /* ─────────────  Constants  ───────────── */
 const PRESETS = {
   "advisor-baseline": {
     label: "Advisor baseline ($6M-ish)",
     note: "Advisor's napkin: 55yr horizon, $15K/mo, 3% infl, 6.5% return, no kids.",
-    state: { curAge:35, retAge:35, lifeExp:90, curInv:6000000, contribMo:0, retNom:65, infl:30, baseMo:15000, kids:0, kidExtraMo:0, kidStart:35, kidEnd:53, midMult:100, oldMult:100, badSeq:false },
+    state: { curAge:35, retAge:35, lifeExp:90, curInv:6000000, contribMo:0, retNom:65, infl:30, exp:scaledExp(15000), kids:0, kidExtraMo:0, kidStart:35, kidEnd:53, midMult:100, oldMult:100, badSeq:false },
   },
   "advisor-2kids": {
     label: "With 2 kids ($10M target)",
     note: "Same horizon but +$2K/mo per kid age 35→53. Advisor said 6M won't work with kids.",
-    state: { curAge:35, retAge:35, lifeExp:90, curInv:10000000, contribMo:0, retNom:65, infl:30, baseMo:15000, kids:2, kidExtraMo:2000, kidStart:35, kidEnd:53, midMult:100, oldMult:90, badSeq:false },
+    state: { curAge:35, retAge:35, lifeExp:90, curInv:10000000, contribMo:0, retNom:65, infl:30, exp:scaledExp(15000), kids:2, kidExtraMo:2000, kidStart:35, kidEnd:53, midMult:100, oldMult:90, badSeq:false },
   },
   "advisor-lowreturns": {
     label: "If returns are 4% ($10M)",
     note: "Stress test: returns 4% instead of 6.5%. Advisor: drops to 10M.",
-    state: { curAge:35, retAge:35, lifeExp:90, curInv:10000000, contribMo:0, retNom:40, infl:30, baseMo:15000, kids:0, kidExtraMo:0, kidStart:35, kidEnd:53, midMult:100, oldMult:90, badSeq:false },
+    state: { curAge:35, retAge:35, lifeExp:90, curInv:10000000, contribMo:0, retNom:40, infl:30, exp:scaledExp(15000), kids:0, kidExtraMo:0, kidStart:35, kidEnd:53, midMult:100, oldMult:90, badSeq:false },
   },
   "advisor-highinfl": {
     label: "Inflation +0.5% ($7M)",
     note: "Same as baseline but inflation 3.5%. Advisor: bumps to ~7M.",
-    state: { curAge:35, retAge:35, lifeExp:90, curInv:7000000, contribMo:0, retNom:65, infl:35, baseMo:15000, kids:0, kidExtraMo:0, kidStart:35, kidEnd:53, midMult:100, oldMult:100, badSeq:false },
+    state: { curAge:35, retAge:35, lifeExp:90, curInv:7000000, contribMo:0, retNom:65, infl:35, exp:scaledExp(15000), kids:0, kidExtraMo:0, kidStart:35, kidEnd:53, midMult:100, oldMult:100, badSeq:false },
   },
   "matt-current": {
     label: "Matt's current plan",
     note: "Working from current age toward 35. Solve for monthly contribution.",
-    state: { curAge:28, retAge:35, lifeExp:90, curInv:75000, contribMo:8000, retNom:65, infl:30, baseMo:8000, kids:2, kidExtraMo:1500, kidStart:35, kidEnd:53, midMult:100, oldMult:80, badSeq:false },
+    state: { curAge:28, retAge:35, lifeExp:90, curInv:75000, contribMo:8000, retNom:65, infl:30, exp:defaultExp(), kids:2, kidExtraMo:1500, kidStart:35, kidEnd:53, midMult:100, oldMult:80, badSeq:false },
   },
 };
 
@@ -48,7 +104,8 @@ function ageMultiplier(age, retAge, midMult, oldMult){
 
 /** Simulate year by year. Returns {trajectory:[{age,portfolio,spend,contrib}], endBalance, depleteAge, peakNeeded}. */
 function simulate(s, opts={}){
-  const { curAge, retAge, lifeExp, curInv, contribMo, retNom, infl, baseMo, kids, kidExtraMo, kidStart, kidEnd, midMult, oldMult } = s;
+  const { curAge, retAge, lifeExp, curInv, contribMo, retNom, infl, kids, kidExtraMo, kidStart, kidEnd, midMult, oldMult } = s;
+  const baseMo = sumExp(s.exp);
   const r = retNom/1000;       // nominal return (e.g. 65 → 6.5%)
   const i = infl/1000;         // inflation
   const overrideContrib = opts.contribMo != null ? opts.contribMo : contribMo;
@@ -209,9 +266,18 @@ export default function App(){
 
   const yearsTo = state.retAge - state.curAge;
   const inflMultRet = Math.pow(1 + state.infl/1000, yearsTo);
-  const annualSpendNow = state.baseMo*12;
+  const baseMo = sumExp(state.exp);
+  const annualSpendNow = baseMo*12;
   const annualSpendRetNom = annualSpendNow * inflMultRet;
   const fvCur = state.curInv * Math.pow(1 + state.retNom/1000, yearsTo);
+
+  /* Per-category monthly totals */
+  const catTotals = useMemo(()=>{
+    const o = {};
+    CATS.forEach(c => { o[c.key] = c.items.reduce((a,it)=>a + (state.exp?.[it.k] ?? it.d), 0); });
+    return o;
+  }, [state.exp]);
+  const setItem = (k,v) => setState(p => ({ ...p, exp: { ...(p.exp||defaultExp()), [k]: v } }));
 
   const chartData = sim.trajectory.map((d,idx)=>({
     age: d.age,
@@ -225,7 +291,7 @@ export default function App(){
   /* Mermaid: equation backbones — show how every value derives from inputs. */
   const r = (state.retNom/10).toFixed(1);
   const i = (state.infl/10).toFixed(1);
-  const baseAnnual = state.baseMo*12;
+  const baseAnnual = baseMo*12;
   const mermaidChart = `flowchart TB
     classDef eq fill:#fff,stroke:#1c1c1c,stroke-width:1.5px,color:#1c1c1c
     classDef inp fill:#fafaf7,stroke:#b5ad9e,stroke-dasharray:3 3,color:#1c1c1c
@@ -242,7 +308,7 @@ export default function App(){
       I5["C = ${fmt$(state.contribMo)}/mo"]:::inp
       I6["r = ${r}% /yr<br/>nominal return"]:::inp
       I7["i = ${i}% /yr<br/>inflation"]:::inp
-      I8["BaseMo = ${fmt$(state.baseMo)}/mo<br/>(today's $)"]:::inp
+      I8["BaseMo = ${fmt$(baseMo)}/mo<br/>(sum of itemized)"]:::inp
     end
 
     EQI["<b>Inflation factor</b><br/>Infl(t) = (1 + i)^(t − curAge)<br/>at t=retAge: (1+${i}%)^${yearsTo} = ${inflMultRet.toFixed(3)}×"]:::eq
@@ -335,7 +401,32 @@ export default function App(){
           <Field label="Monthly contribution (now → retire)" hint={`Solver says: ${fmt$(reqContrib)}/mo to fully fund`}><Stepper value={state.contribMo} onChange={v=>set("contribMo",v)} step={250}/></Field>
           <Field label="Nominal return /yr" hint="Steps in 0.1%"><PctStepper value={state.retNom} onChange={v=>set("retNom",v)} step={1} min={0} max={300}/></Field>
           <Field label="Inflation /yr" hint="Steps in 0.1%"><PctStepper value={state.infl} onChange={v=>set("infl",v)} step={1} min={0} max={200}/></Field>
-          <Field label="Base spend (today's $/mo)" hint={`At retire age ≈ ${fmt$(state.baseMo*inflMultRet)}/mo nominal`}><Stepper value={state.baseMo} onChange={v=>set("baseMo",v)} step={250}/></Field>
+          <Field label="Base spend (today's $/mo)" hint={`Sum of itemized expenses below. At retire age ≈ ${fmt$(baseMo*inflMultRet)}/mo nominal`}>
+            <span style={{...S.sVal, display:"inline-block", minWidth:120}}>{fmt$(baseMo)}/mo</span>
+          </Field>
+        </div>
+      </div>
+
+      {/* Itemized expenses */}
+      <div style={S.section}>
+        <div style={S.sectionTitle}>Retirement expenses (today's $) · total {fmt$(baseMo)}/mo · {fmt$(baseMo*12)}/yr</div>
+        <div style={S.catGrid}>
+          {CATS.map(cat => (
+            <div key={cat.key} style={{...S.catBox, borderLeft:`3px solid ${cat.color}`}}>
+              <div style={S.catHead}>
+                <span style={{...S.catName, color:cat.color}}>{cat.key}</span>
+                <span style={S.catTot}>{fmt$(catTotals[cat.key])}/mo</span>
+              </div>
+              <div style={S.itemGrid}>
+                {cat.items.map(it => (
+                  <div key={it.k} style={S.itemRow}>
+                    <span style={S.itemL}>{it.l}</span>
+                    <Stepper value={state.exp?.[it.k] ?? it.d} onChange={v=>setItem(it.k,v)} step={it.s}/>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -445,4 +536,12 @@ const S = {
   sumGrid:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginTop:6},
   sumNote:{fontSize:11,color:"#aaa",marginTop:14,lineHeight:1.6},
   code:{background:"#2a2a2a",padding:"2px 6px",borderRadius:3,color:"#ffd28a",fontSize:10,wordBreak:"break-all"},
+  catGrid:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:10},
+  catBox:{background:"#fafaf7",borderRadius:6,padding:"10px 12px"},
+  catHead:{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,paddingBottom:6,borderBottom:"1px solid #ece7df"},
+  catName:{fontSize:12,fontWeight:700,letterSpacing:"0.04em",textTransform:"uppercase"},
+  catTot:{fontSize:11,color:"#888",fontWeight:600},
+  itemGrid:{display:"flex",flexDirection:"column",gap:5},
+  itemRow:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8},
+  itemL:{fontSize:11,color:"#666",flex:1},
 };
