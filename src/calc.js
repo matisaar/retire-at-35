@@ -80,13 +80,18 @@ export function derive(s){
  * Layout order top→bottom: hero, scenarios, breakdown, eq1, eq2, eq3, eq4, eq5(+inputs), eq6.
  * Tested in App.connections.test.jsx — every from/to MUST exist in the DOM.
  */
+export const catSlug = (key) => key.replace(/[^a-zA-Z0-9]/g, "");
+
 export const CONNECTIONS = [
   // hero shows N → eq2 defines N
   { from:"hero-N",          to:"eq2-N",   color:"#2a9d8f" },
 
-  // breakdown feeds Monthly Spend
+  // breakdown total tile feeds Monthly Spend
   { from:"breakdown-base",  to:"def-Mo",  color:"#c47a3a" },
   { from:"breakdown-kids",  to:"def-Mo",  color:"#b07a8a" },
+
+  // eq4 sums each category → each category equation card below
+  ...CATS.map(c => ({ from:`eq4-cat-${catSlug(c.key)}`, to:`cat-${catSlug(c.key)}`, color:c.color })),
 
   // eq1 references → their definitions further down
   { from:"eq1-N",           to:"eq2-N",   color:"#2a9d8f" },
@@ -103,9 +108,6 @@ export const CONNECTIONS = [
   { from:"eq3-Inv",         to:"def-Inv", color:"#457bb5" },
   { from:"eq3-r",           to:"def-r",   color:"#b8892a" },
   { from:"eq3-Y",           to:"eq5-Y",   color:"#7a8e5a" },
-
-  // eq4 references
-  { from:"eq4-Mo",          to:"def-Mo",  color:"#c47a3a" },
 
   // eq5 references (Y appears twice in 'n = Y × 12'; second Y points to first Y above it)
   { from:"eq5-RA",          to:"def-RA",  color:"#3a9e6e" },

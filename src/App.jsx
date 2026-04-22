@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { supabase, isSupabase } from "./supabase.js";
 import BugReportButton from "./BugReportButton.jsx";
-import { CATS, ALL_ITEMS, defaultExp, sumCat, derive, CONNECTIONS } from "./calc.js";
+import { CATS, ALL_ITEMS, defaultExp, sumCat, derive, CONNECTIONS, catSlug } from "./calc.js";
 
 /* ── Shared colors ── */
 const C_NEST="#2a9d8f", C_FV="#6a8ab5", C_RATE="#b8892a", C_MONTHS="#8b5fb0", C_YEARS="#7a8e5a";
@@ -182,12 +182,12 @@ export default function App(){
           </div>
         </div></div>
 
-        {/* Itemized Monthly Cost Breakdown (today's $) */}
+        {/* Itemized Monthly Cost Breakdown — one equation card per category */}
         <div style={st.rc}><div style={st.eq}>
           <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
             <div>
               <div style={st.tag}>Monthly cost breakdown (today's $)</div>
-              <div style={{fontSize:11,color:"#888",marginTop:2}}>What you'll spend per month at age {s.retAge}. Adjust each line. Kids cost is added separately below.</div>
+              <div style={{fontSize:11,color:"#888",marginTop:2}}>Every line item is its own pill. Edit anything. Each category sums and × 12 to its annual cost. Kids are added separately.</div>
             </div>
             <div data-var="breakdown-base" style={{textAlign:"right",border:"1.5px solid "+C_MO,borderRadius:8,padding:"4px 10px",background:"#fff7f0"}}>
               <div style={{fontSize:10,color:"#aaa",letterSpacing:".06em",textTransform:"uppercase"}}>Itemized base</div>
@@ -196,33 +196,33 @@ export default function App(){
               <div style={{fontSize:11,color:"#888",marginTop:2}}>= {fmt(spendMo*12)} / yr</div>
             </div>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:10,marginTop:12}}>
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:12}}>
             {CATS.map(cat => {
               const sub = sumCat(cat, s.exp);
               return (
                 <div key={cat.key} style={{background:"#fafaf7",border:"1px solid #ece8e0",borderRadius:8,padding:"8px 10px"}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <span style={{width:8,height:8,borderRadius:"50%",background:cat.color,display:"inline-block"}}/>
-                      <span style={{fontSize:12,fontWeight:600,color:"#1c1c1c"}}>{cat.key}</span>
-                    </div>
-                    <span style={{fontSize:12,fontWeight:600,color:cat.color}}>{fmt(sub)}/mo</span>
-                  </div>
-                  <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                    {cat.items.map(it => {
+                  <div style={{...st.ml,fontSize:13,rowGap:6,columnGap:6,alignItems:"center"}}>
+                    <Pill name={cat.key} id={`cat-${catSlug(cat.key)}`} color={cat.color}/>
+                    <Op c="="/>
+                    <span style={{color:"#888",fontSize:14,fontFamily:"'Source Serif 4',serif"}}>(</span>
+                    {cat.items.map((it,i) => {
                       const v = Number(s.exp?.[it.k] ?? it.d) || 0;
                       return (
-                        <div key={it.k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6}}>
-                          <span style={{fontSize:11,color:"#666",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{it.l}</span>
+                        <span key={it.k} style={{display:"inline-flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+                          {i>0 && <Op c="+"/>}
+                          <span style={{fontSize:11,color:"#666"}}>{it.l}</span>
                           <span style={{display:"inline-flex",alignItems:"center",gap:2,background:"#fff",border:"1px solid #e0dbd3",borderRadius:5,padding:"1px 2px"}}>
-                            <button onClick={()=>setExp(it.k, v - it.s)} style={{padding:"2px 6px",lineHeight:1,fontSize:13,color:"#888"}} aria-label="decrease">−</button>
+                            <button onClick={()=>setExp(it.k, Math.max(0, v - it.s))} style={{padding:"2px 6px",lineHeight:1,fontSize:13,color:"#888"}} aria-label="decrease">−</button>
                             <span style={{fontSize:11,fontWeight:600,minWidth:46,textAlign:"center",color: v>0?"#1c1c1c":"#bbb"}}>${v.toLocaleString()}</span>
                             <button onClick={()=>setExp(it.k, v + it.s)} style={{padding:"2px 6px",lineHeight:1,fontSize:13,color:"#888"}} aria-label="increase">+</button>
                           </span>
-                        </div>
+                        </span>
                       );
                     })}
+                    <span style={{color:"#888",fontSize:14,fontFamily:"'Source Serif 4',serif"}}>)</span>
+                    <Op c="×"/> <span style={st.opNum}>12</span>
                   </div>
+                  <div style={{...st.rr,color:cat.color}}>= {fmt(sub*12)}/yr &nbsp;·&nbsp; {fmt(sub)}/mo</div>
                 </div>
               );
             })}
@@ -285,12 +285,20 @@ export default function App(){
           <div style={st.rr}>= {fmt(s.curInv)} × (1+{s.realRet.toFixed(1)}%)^{Y.toFixed(1)} = {fmtM(FVcur)}</div>
         </div></div>
 
-        {/* Equation 4: Annual Expenses (single $/mo) */}
+        {/* Equation 4: Annual Expenses = sum of category equation cards × 12 */}
         <div style={st.rc}><div style={st.eq}>
           <div style={st.tag}>Annual Retirement Expenses (today's $)</div>
           <div style={st.ml}>
             <Pill name="Annual Expenses" id="eq4-E" color={C_EXP}/> <Op c="="/>{" "}
-            <Pill name="Monthly Spend" id="eq4-Mo" color={C_MO}/> <Op c="×"/> <span style={st.opNum}>12</span>
+            (
+            {CATS.map((c,i) => (
+              <span key={c.key} style={{display:"inline-flex",alignItems:"center",gap:4}}>
+                {i>0 && <Op c="+"/>}
+                <Pill name={c.key} id={`eq4-cat-${catSlug(c.key)}`} color={c.color}/>
+              </span>
+            ))}
+            {kidsMo>0 && <> <Op c="+"/> <Pill name="Kids" id="eq4-Kids" color={C_KIDS}/></>}
+            ) <Op c="×"/> <span style={st.opNum}>12</span>
           </div>
           <div style={st.rr}>= {fmt(spendMo)}/mo × 12 = {fmt(E)}/yr {kidsMo>0 && <>&nbsp;·&nbsp; ({fmt(baseMo)} base + {fmt(kidsMo)} kids)</>}</div>
         </div></div>
